@@ -111,9 +111,11 @@ Implemented tools:
 Notable behavior:
 
 - `record_tool_run` infers a readable run name from `command` when `name` is omitted, sets `entity/status` from `exit_code` (`success` or `failed`), and can track replacement lineage via `supersedes_run_ids` / `retries_of_run_ids`.
+- write tools enforce strict argument validation; unsupported fields are rejected with remediation data.
 - `record_error` defaults to `entity/status = open` unless provided explicitly.
 - `link_entities` with `link_type = resolved_by` auto-marks the source error as `resolved` and attaches the resolver run as a reference.
 - `summarize_project_memory` and `memory://project/{project_id}/recent-failures` exclude errors already marked `resolved`/`closed`.
+- `remember_fact` auto-normalizes `attributes.files` / `attributes.file_paths` into `file:*` refs, upserts missing file entities, and returns `normalized_file_refs`.
 - `normalize_project_memory` supports project-scoped `dry_run|apply` housekeeping with operation filters:
   - `normalize_entity_types`
   - `backfill_error_resolution`
@@ -218,8 +220,11 @@ For all non-trivial coding tasks in this repository, you MUST use the `datalevin
 
 ### 3) Write During/After Work
 - Record command executions with `record_tool_run` (build/test/lint/tool output).
+- Use one command per `record_tool_run` entry; do not combine commands with `&&` in a single run record.
+- Do not send unknown tool arguments. MCP calls with unsupported fields are rejected.
 - Record failures with `record_error` and link to related runs/symbols.
 - Persist key findings/decisions with `remember_fact` (or `record_event` for timeline milestones).
+- When a fact references files, include `attributes.files` or `attributes.file_paths`; the server will auto-upsert `file:*` entities and attach them via `entity/refs`.
 - Create explicit causality with `link_entities` when useful (e.g. error -> decision -> patch).
 
 ### 4) End-of-Task Memory Writeback

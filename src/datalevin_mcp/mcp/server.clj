@@ -93,6 +93,43 @@
     {:entity/source (or (:source provenance) default-source)
      :entity/source-ref (:source_ref provenance)}))
 
+(def tool-allowed-args
+  {"ensure_project" #{:project_id :name :summary :body :root :timestamp :provenance}
+   "list_projects" #{}
+   "upsert_code_entity" #{:project_id :kind :file_id :file_path :file_name :module :language
+                          :symbol_id :symbol_name :qualified_name :signature :symbol_kind
+                          :summary :body :file_summary :file_body :timestamp :provenance}
+   "search_entities" #{:project_id :query :mode :entity_type :limit}
+   "remember_fact" #{:entity_id :entity_type :name :summary :body :project_id :session_id :task_id
+                     :timestamp :attributes :relationships :provenance}
+   "record_event" #{:event_id :kind :name :summary :project_id :session_id :task_id :timestamp
+                    :subject_ids :provenance}
+   "record_tool_run" #{:run_id :name :summary :body :project_id :session_id :task_id :command :phase
+                       :exit_code :output :touched_file_ids :supersedes_run_ids :retries_of_run_ids
+                       :timestamp :provenance}
+   "record_error" #{:error_id :name :summary :body :details :project_id :session_id :task_id
+                    :tool_run_id :category :status :related_symbol_ids :related_entity_ids
+                    :timestamp :provenance}
+   "link_entities" #{:link_id :name :summary :body :project_id :session_id :task_id :from_id :to_id
+                     :link_type :explanation :evidence_ids :timestamp :provenance}
+   "search_notes" #{:project_id :query :limit}
+   "find_related_context" #{:entity_id :limit :hops}
+   "get_symbol_memory" #{:symbol_id :limit}
+   "get_task_timeline" #{:task_id}
+   "summarize_project_memory" #{:project_id}
+   "normalize_project_memory" #{:project_id :mode :operations :max_changes :migration_id :provenance}})
+
+(defn- validate-tool-arguments!
+  [tool-name arguments]
+  (when-let [allowed (get tool-allowed-args tool-name)]
+    (let [incoming (set (keys (or arguments {})))
+          unknown (->> incoming (remove allowed) sort vec)]
+      (when (seq unknown)
+        (throw (ex-info "Tool received unsupported arguments"
+                        {:tool_name tool-name
+                         :unsupported_arguments unknown
+                         :allowed_arguments (->> allowed sort vec)}))))))
+
 (defn- transact-and-fetch!
   [conn entity]
   (store/transact-entities! conn [entity])
@@ -314,27 +351,59 @@
         provenance (default-provenance arguments "remember_fact")
         entity-id (:entity_id arguments)
         {:keys [entity-type entity-kind type-policy]} (normalize-entity-type (:entity_type arguments))
-        entity (merge attributes
-                      relationships
+        timestamp (or (:timestamp arguments) (util/now-iso))
+        raw-files (concat (util/ensure-vector (:files attributes))
+                          (util/ensure-vector (:file_paths attributes)))
+        file-ref-ids (->> raw-files
+                          (map str)
+                          (map str/trim)
+                          (remove str/blank?)
+                          (map #(if (str/starts-with? % "file:") % (str "file:" %)))
+                          distinct
+                          vec)
+        existing-refs (vec (util/ensure-vector (:entity/refs relationships)))
+        merged-refs (->> (concat existing-refs file-ref-ids)
+                         (remove nil?)
+                         distinct
+                         vec)
+        cleaned-attributes (dissoc attributes :files :file_paths)
+        normalized-relationships (cond-> relationships
+                                   (seq merged-refs) (assoc :entity/refs merged-refs))
+        file-entities (mapv (fn [file-ref-id]
+                              (let [path (subs file-ref-id (count "file:"))]
+                                (merge provenance
+                                       {:entity/id file-ref-id
+                                        :entity/type :file
+                                        :entity/name (.getName (io/file path))
+                                        :entity/path path
+                                        :entity/project (:project_id arguments)
+                                        :entity/created-at timestamp
+                                        :entity/updated-at timestamp
+                                        :entity/body path})))
+                            file-ref-ids)
+        entity (merge cleaned-attributes
+                      normalized-relationships
                       provenance
                       {:entity/id entity-id
                        :entity/type entity-type
-                       :entity/kind (or (:entity/kind attributes) entity-kind)
+                       :entity/kind (or (:entity/kind cleaned-attributes) entity-kind)
                        :entity/name (:name arguments)
                        :entity/summary (:summary arguments)
-                       :entity/body (or (:entity/body attributes)
+                       :entity/body (or (:entity/body cleaned-attributes)
                                         (:body arguments)
                                         (:summary arguments)
                                         (:name arguments))
                        :entity/project (:project_id arguments)
                        :entity/session (:session_id arguments)
                        :entity/task (:task_id arguments)
-                       :entity/created-at (or (:timestamp arguments) (util/now-iso))
-                       :entity/updated-at (or (:timestamp arguments) (util/now-iso))})
-        result (transact-and-fetch! conn entity)]
+                       :entity/created-at timestamp
+                       :entity/updated-at timestamp})]
+    (store/transact-entities! conn (conj file-entities entity))
+    (let [result {:entity (store/pull-entity-by-id (store/db conn) entity-id)}]
     (assoc result
            :entity_type_policy type-policy
-           :normalized_entity_type entity-type)))
+           :normalized_entity_type entity-type
+           :normalized_file_refs file-ref-ids))))
 
 (defn- record-event!
   [conn arguments]
@@ -440,6 +509,7 @@
 
 (defn- call-tool!
   [conn tool-name arguments]
+  (validate-tool-arguments! tool-name arguments)
   (case tool-name
     "ensure_project" (ensure-project! conn arguments)
     "list_projects" (list-projects! conn)
@@ -544,7 +614,7 @@
                                :limit {:type "integer"}}
                   :required ["project_id" "query"]}}
    {:name "remember_fact"
-    :description "Use when you need to persist a new or updated structured memory fact with provenance and explicit relationships."
+    :description "Use when you need to persist a new or updated structured memory fact with provenance and explicit relationships. If attributes include files/file_paths, the server auto-upserts file:* entities and links them via entity/refs."
     :inputSchema {:type "object"
                   :properties {:entity_id {:type "string"}
                                :entity_type {:type "string"}

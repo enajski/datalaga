@@ -94,9 +94,11 @@ Design principle:
 Operational semantics implemented in tools:
 
 - `record_tool_run` infers a friendly run name from the command when omitted, sets `:entity/status` based on `exit_code`, and stores supersession lineage (`:tool-run/supersedes`, `:tool-run/retries-of`).
+- write tools validate allowed arguments strictly to prevent silent acceptance of unsupported fields.
 - `record_error` defaults `:entity/status` to `:open` (or accepts explicit status).
 - `link_entities` with `link_type = resolved_by` marks the source error as `:resolved` and records the resolving entity in refs.
 - failure-focused views (`recent-failures`, `project-summary`) exclude errors with status `:resolved` or `:closed`.
+- `remember_fact` normalizes `attributes.files` / `attributes.file_paths` into canonical `file:*` refs and auto-upserts file entities for consistent graph linking.
 - `normalize_project_memory` provides project-scoped housekeeping with operation filters (`normalize_entity_types`, `backfill_error_resolution`, `link_run_supersession`), `max_changes` safety cap, and `migration_id` idempotency via migration event writeback.
 
 Entity type policy:
