@@ -89,6 +89,13 @@ Design principle:
 - expose coding-memory operations, not raw Datalevin internals
 - return actionable remediation hints when project references are missing
 
+Operational semantics implemented in tools:
+
+- `record_tool_run` infers a friendly run name from the command when omitted, sets `:entity/status` based on `exit_code`, and stores supersession lineage (`:tool-run/supersedes`, `:tool-run/retries-of`).
+- `record_error` defaults `:entity/status` to `:open` (or accepts explicit status).
+- `link_entities` with `link_type = resolved_by` marks the source error as `:resolved` and records the resolving entity in refs.
+- failure-focused views (`recent-failures`, `project-summary`) exclude errors with status `:resolved` or `:closed`.
+
 Entity type policy:
 
 - known core types are accepted directly

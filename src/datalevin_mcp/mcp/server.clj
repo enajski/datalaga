@@ -169,6 +169,21 @@
                             "symbol")]
           (str "symbol:" file_path "#" name-part)))))
 
+(defn- infer-run-name
+  [command explicit-name]
+  (or explicit-name
+      (when (and command (not (str/blank? command)))
+        (->> (str/split command #"\s+")
+             (take 3)
+             (str/join " ")))
+      "tool run"))
+
+(defn- run-status
+  [exit-code]
+  (if (zero? (long (or exit-code 0)))
+    :success
+    :failed))
+
 (defn- upsert-code-entity!
   [conn arguments]
   (let [project-id (:project_id arguments)
@@ -348,7 +363,8 @@
    (merge (default-provenance arguments "record_tool_run")
           {:entity/id (:run_id arguments)
            :entity/type :tool-run
-           :entity/name (or (:name arguments) "tool run")
+           :entity/name (infer-run-name (:command arguments) (:name arguments))
+           :entity/status (run-status (:exit_code arguments))
            :entity/summary (:summary arguments)
            :entity/body (or (:body arguments) (:summary arguments) (:output arguments))
            :entity/project (:project_id arguments)
@@ -360,7 +376,9 @@
            :tool-run/phase (util/->keyword (or (:phase arguments) "tool"))
            :tool-run/exit-code (long (or (:exit_code arguments) 0))
            :tool-run/output (:output arguments)
-           :tool-run/touched-files (vec (:touched_file_ids arguments))})))
+           :tool-run/touched-files (vec (:touched_file_ids arguments))
+           :tool-run/supersedes (vec (:supersedes_run_ids arguments))
+           :tool-run/retries-of (vec (:retries_of_run_ids arguments))})))
 
 (defn- record-error!
   [conn arguments]
@@ -373,6 +391,7 @@
             {:entity/id (:error_id arguments)
              :entity/type :error
              :entity/name (or (:name arguments) "error")
+             :entity/status (util/->keyword (or (:status arguments) "open"))
              :entity/summary (:summary arguments)
              :entity/body (or (:body arguments) (:summary arguments) (:details arguments))
              :entity/project (:project_id arguments)
@@ -388,24 +407,35 @@
 
 (defn- link-entities!
   [conn arguments]
-  (transact-and-fetch!
-   conn
-   (merge (default-provenance arguments "link_entities")
-          {:entity/id (:link_id arguments)
-           :entity/type :link
-           :entity/name (or (:name arguments) "entity link")
-           :entity/summary (:summary arguments)
-           :entity/body (or (:body arguments) (:summary arguments) (:explanation arguments))
-           :entity/project (:project_id arguments)
-           :entity/session (:session_id arguments)
-           :entity/task (:task_id arguments)
-           :entity/created-at (or (:timestamp arguments) (util/now-iso))
-           :entity/updated-at (or (:timestamp arguments) (util/now-iso))
-           :link/from (:from_id arguments)
-           :link/to (:to_id arguments)
-           :link/type (util/->keyword (:link_type arguments))
-           :link/explanation (:explanation arguments)
-           :link/evidence (vec (:evidence_ids arguments))})))
+  (let [timestamp (or (:timestamp arguments) (util/now-iso))
+        link-type (util/->keyword (:link_type arguments))
+        link-entity (merge (default-provenance arguments "link_entities")
+                           {:entity/id (:link_id arguments)
+                            :entity/type :link
+                            :entity/name (or (:name arguments) "entity link")
+                            :entity/summary (:summary arguments)
+                            :entity/body (or (:body arguments) (:summary arguments) (:explanation arguments))
+                            :entity/project (:project_id arguments)
+                            :entity/session (:session_id arguments)
+                            :entity/task (:task_id arguments)
+                            :entity/created-at timestamp
+                            :entity/updated-at timestamp
+                            :link/from (:from_id arguments)
+                            :link/to (:to_id arguments)
+                            :link/type link-type
+                            :link/explanation (:explanation arguments)
+                            :link/evidence (vec (:evidence_ids arguments))})
+        maybe-resolution (when (= :resolved_by link-type)
+                           {:entity/id (:from_id arguments)
+                            :entity/status :resolved
+                            :entity/updated-at timestamp
+                            :entity/refs [(:to_id arguments)]})]
+    (store/transact-entities! conn (if maybe-resolution
+                                     [link-entity maybe-resolution]
+                                     [link-entity]))
+    {:entity (store/pull-entity-by-id (store/db conn) (:link_id arguments))
+     :resolved_entity (when maybe-resolution
+                        (store/pull-entity-by-id (store/db conn) (:from_id arguments)))}))
 
 (defn- call-tool!
   [conn tool-name arguments]
@@ -561,6 +591,8 @@
                                :exit_code {:type "integer"}
                                :output {:type "string"}
                                :touched_file_ids {:type "array" :items {:type "string"}}
+                               :supersedes_run_ids {:type "array" :items {:type "string"}}
+                               :retries_of_run_ids {:type "array" :items {:type "string"}}
                                :timestamp {:type "string"}
                                :provenance {:type "object"
                                             :properties {:source {:type "string"}
@@ -578,6 +610,7 @@
                                :task_id {:type "string"}
                                :tool_run_id {:type "string"}
                                :category {:type "string"}
+                               :status {:type "string"}
                                :related_symbol_ids {:type "array" :items {:type "string"}}
                                :related_entity_ids {:type "array" :items {:type "string"}}
                                :timestamp {:type "string"}

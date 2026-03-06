@@ -56,6 +56,10 @@
    :tool-run/phase {:db/valueType :db.type/keyword}
    :tool-run/touched-files {:db/valueType :db.type/ref
                             :db/cardinality :db.cardinality/many}
+   :tool-run/supersedes {:db/valueType :db.type/ref
+                         :db/cardinality :db.cardinality/many}
+   :tool-run/retries-of {:db/valueType :db.type/ref
+                         :db/cardinality :db.cardinality/many}
 
    :error/tool-run {:db/valueType :db.type/ref}
    :error/category {:db/valueType :db.type/keyword}
@@ -114,6 +118,8 @@
     :task/touched-files
     :task/related-symbols
     :tool-run/touched-files
+    :tool-run/supersedes
+    :tool-run/retries-of
     :error/tool-run
     :error/related-symbols
     :observation/tool-run
@@ -137,6 +143,8 @@
     :task/touched-files
     :task/related-symbols
     :tool-run/touched-files
+    :tool-run/supersedes
+    :tool-run/retries-of
     :error/related-symbols
     :decision/alternatives
     :decision/related-files
@@ -214,6 +222,8 @@
    :tool-run/exit-code
    :tool-run/output
    :tool-run/phase
+   :tool-run/supersedes
+   :tool-run/retries-of
    :error/category
    :error/details
    :observation/confidence
@@ -239,6 +249,8 @@
    {:task/touched-files [:entity/id :entity/name :entity/path]}
    {:task/related-symbols [:entity/id :entity/name]}
    {:tool-run/touched-files [:entity/id :entity/name :entity/path]}
+   {:tool-run/supersedes [:entity/id :entity/type :entity/name]}
+   {:tool-run/retries-of [:entity/id :entity/type :entity/name]}
    {:error/tool-run [:entity/id :entity/name]}
    {:error/related-symbols [:entity/id :entity/name]}
    {:observation/tool-run [:entity/id :entity/name]}

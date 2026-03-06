@@ -98,6 +98,13 @@ Implemented tools:
 - `get_task_timeline`
 - `summarize_project_memory`
 
+Notable behavior:
+
+- `record_tool_run` infers a readable run name from `command` when `name` is omitted, sets `entity/status` from `exit_code` (`success` or `failed`), and can track replacement lineage via `supersedes_run_ids` / `retries_of_run_ids`.
+- `record_error` defaults to `entity/status = open` unless provided explicitly.
+- `link_entities` with `link_type = resolved_by` auto-marks the source error as `resolved` and attaches the resolver run as a reference.
+- `summarize_project_memory` and `memory://project/{project_id}/recent-failures` exclude errors already marked `resolved`/`closed`.
+
 Exposed resources:
 
 - `memory://project/{project_id}/summary`
