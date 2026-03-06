@@ -320,6 +320,75 @@
     :success
     :failed))
 
+(defn- lower-str
+  [value]
+  (some-> value str str/lower-case))
+
+(defn- exact-code-query-score
+  [query entity]
+  (let [q (lower-str query)
+        entity-id (lower-str (:entity/id entity))
+        entity-path (lower-str (:entity/path entity))
+        entity-name (lower-str (:entity/name entity))
+        qualified-name (lower-str (get entity :symbol/qualified-name))]
+    (cond
+      (or (= q entity-id) (= q entity-path) (= q entity-name) (= q qualified-name)) 100
+      (or (and entity-path (str/includes? entity-path q))
+          (and entity-id (str/includes? entity-id q))
+          (and qualified-name (str/includes? qualified-name q))) 60
+      (and entity-name (str/includes? entity-name q)) 40
+      :else 0)))
+
+(defn- ranked-search-results
+  [query results]
+  (->> results
+       (map (fn [entity]
+              [entity
+               (exact-code-query-score query entity)
+               (some-> (:entity/created-at entity) .getTime)]))
+       (sort-by (fn [[entity score created-at]]
+                  [score
+                   (or created-at Long/MIN_VALUE)
+                   (:entity/id entity)]))
+       reverse
+       (map first)
+       vec))
+
+(defn- same-run-scope?
+  [run task-id session-id command]
+  (and (= command (:tool-run/command run))
+       (= task-id (get-in run [:entity/task :entity/id]))
+       (= session-id (get-in run [:entity/session :entity/id]))))
+
+(defn- infer-run-lineage
+  [conn arguments]
+  (let [provided-supersedes (vec (:supersedes_run_ids arguments))
+        provided-retries (vec (:retries_of_run_ids arguments))]
+    (if (or (seq provided-supersedes) (seq provided-retries))
+      {:supersedes provided-supersedes
+       :retries-of provided-retries
+       :inferred false}
+      (let [project-id (:project_id arguments)
+            run-id (:run_id arguments)
+            task-id (:task_id arguments)
+            session-id (:session_id arguments)
+            command (:command arguments)
+            prior-runs (->> (store/entities-by-type (store/db conn) :tool-run project-id)
+                            (remove #(= run-id (:entity/id %)))
+                            (filter #(same-run-scope? % task-id session-id command))
+                            (sort-by (fn [run]
+                                       [(some-> (:entity/created-at run) .getTime)
+                                        (:entity/id run)]))
+                            reverse)
+            prior-run-id (some-> prior-runs first :entity/id)]
+        (if prior-run-id
+          {:supersedes [prior-run-id]
+           :retries-of [prior-run-id]
+           :inferred true}
+          {:supersedes []
+           :retries-of []
+           :inferred false})))))
+
 (defn- upsert-code-entity!
   [conn arguments]
   (let [project-id (:project_id arguments)
@@ -434,9 +503,11 @@
                       (throw (ex-info "Unsupported search mode"
                                       {:mode mode
                                        :supported-modes ["exact" "fulltext" "hybrid"]})))
-        filtered-results (cond->> raw-results
-                           entity-type-filter (filter #(= entity-type-filter (:entity/type %)))
-                           true (take limit))]
+        maybe-type-filtered (cond->> raw-results
+                               entity-type-filter (filter #(= entity-type-filter (:entity/type %))))
+        filtered-results (->> maybe-type-filtered
+                              (ranked-search-results query)
+                              (take limit))]
     {:project_id project-id
      :query query
      :mode (name mode)
@@ -526,27 +597,29 @@
 
 (defn- record-tool-run!
   [conn arguments]
-  (transact-and-fetch!
-   conn
-   (merge (default-provenance arguments "record_tool_run")
-          {:entity/id (:run_id arguments)
-           :entity/type :tool-run
-           :entity/name (infer-run-name (:command arguments) (:name arguments))
-           :entity/status (run-status (:exit_code arguments))
-           :entity/summary (:summary arguments)
-           :entity/body (or (:body arguments) (:summary arguments) (:output arguments))
-           :entity/project (:project_id arguments)
-           :entity/session (:session_id arguments)
-           :entity/task (:task_id arguments)
-           :entity/created-at (or (:timestamp arguments) (util/now-iso))
-           :entity/updated-at (or (:timestamp arguments) (util/now-iso))
-           :tool-run/command (:command arguments)
-           :tool-run/phase (util/->keyword (or (:phase arguments) "tool"))
-           :tool-run/exit-code (long (or (:exit_code arguments) 0))
-           :tool-run/output (:output arguments)
-           :tool-run/touched-files (vec (:touched_file_ids arguments))
-           :tool-run/supersedes (vec (:supersedes_run_ids arguments))
-           :tool-run/retries-of (vec (:retries_of_run_ids arguments))})))
+  (let [lineage (infer-run-lineage conn arguments)
+        result (transact-and-fetch!
+                conn
+                (merge (default-provenance arguments "record_tool_run")
+                       {:entity/id (:run_id arguments)
+                        :entity/type :tool-run
+                        :entity/name (infer-run-name (:command arguments) (:name arguments))
+                        :entity/status (run-status (:exit_code arguments))
+                        :entity/summary (:summary arguments)
+                        :entity/body (or (:body arguments) (:summary arguments) (:output arguments))
+                        :entity/project (:project_id arguments)
+                        :entity/session (:session_id arguments)
+                        :entity/task (:task_id arguments)
+                        :entity/created-at (or (:timestamp arguments) (util/now-iso))
+                        :entity/updated-at (or (:timestamp arguments) (util/now-iso))
+                        :tool-run/command (:command arguments)
+                        :tool-run/phase (util/->keyword (or (:phase arguments) "tool"))
+                        :tool-run/exit-code (long (or (:exit_code arguments) 0))
+                        :tool-run/output (:output arguments)
+                        :tool-run/touched-files (vec (:touched_file_ids arguments))
+                        :tool-run/supersedes (:supersedes lineage)
+                        :tool-run/retries-of (:retries-of lineage)}))]
+    (assoc result :auto_lineage_inferred (:inferred lineage))))
 
 (defn- record-error!
   [conn arguments]

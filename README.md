@@ -112,6 +112,7 @@ Implemented tools:
 Notable behavior:
 
 - `record_tool_run` infers a readable run name from `command` when `name` is omitted, sets `entity/status` from `exit_code` (`success` or `failed`), and can track replacement lineage via `supersedes_run_ids` / `retries_of_run_ids`.
+- when `record_tool_run` is called without lineage fields, the server auto-links to the most recent matching run in the same project/task/session (`auto_lineage_inferred` in response).
 - write tools enforce strict argument validation; unsupported fields are rejected with remediation data.
 - tool calls also enforce required argument presence (missing required args are rejected early).
 - write transactions now prevalidate references before commit, preventing partial entity writes on missing refs.
@@ -227,6 +228,7 @@ For all non-trivial coding tasks in this repository, you MUST use the `datalevin
 - Record command executions with `record_tool_run` (build/test/lint/tool output).
 - Use one command per `record_tool_run` entry; do not combine commands with `&&` in a single run record.
 - Do not send unknown or incomplete tool arguments. MCP calls with unsupported fields or missing required fields are rejected.
+- If you rerun the same command for a task/session, keep `command` stable so lineage inference can chain retries automatically (or pass explicit `supersedes_run_ids` / `retries_of_run_ids`).
 - Record failures with `record_error` and link to related runs/symbols.
 - Persist key findings/decisions with `remember_fact` (or `record_event` for timeline milestones).
 - When a fact references files, include `attributes.files` or `attributes.file_paths`; the server will auto-upsert `file:*` entities and attach them via `entity/refs`.

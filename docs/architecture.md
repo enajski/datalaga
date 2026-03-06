@@ -95,6 +95,7 @@ Design principle:
 Operational semantics implemented in tools:
 
 - `record_tool_run` infers a friendly run name from the command when omitted, sets `:entity/status` based on `exit_code`, and stores supersession lineage (`:tool-run/supersedes`, `:tool-run/retries-of`).
+- `record_tool_run` can auto-infer supersession/retry lineage when omitted by linking to the latest matching command in the same project/task/session scope.
 - write tools validate allowed arguments strictly to prevent silent acceptance of unsupported fields.
 - tool calls validate required argument presence to fail fast with clear remediation before transaction attempts.
 - `ensure_task` is idempotent for creates and supports updating mutable task metadata (status/summary/priority/description) on existing tasks within the same project.
@@ -116,6 +117,7 @@ Entity type policy:
 `memory/queries.clj` supports multiple retrieval styles:
 
 - exact lookup by stable IDs/names/paths
+- ranked exact/hybrid results prioritize code-like exact matches (`entity/id`, `entity/path`, symbol qualified name) before broad text matches
 - graph traversal around an anchor entity (`find-related-context`)
 - task/symbol dossier assembly (`get-task-timeline`, `get-symbol-memory`)
 - full-text retrieval from `:entity/body`
