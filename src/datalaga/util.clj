@@ -1,4 +1,4 @@
-(ns datalevin-mcp.util
+(ns datalaga.util
   (:require [clojure.string :as str])
   (:import (java.time Instant ZoneOffset)
            (java.time.format DateTimeFormatter)

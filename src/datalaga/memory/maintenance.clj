@@ -1,8 +1,8 @@
-(ns datalevin-mcp.memory.maintenance
+(ns datalaga.memory.maintenance
   (:require [clojure.string :as str]
-            [datalevin-mcp.memory.schema :as schema]
-            [datalevin-mcp.memory.store :as store]
-            [datalevin-mcp.util :as util]))
+            [datalaga.memory.schema :as schema]
+            [datalaga.memory.store :as store]
+            [datalaga.util :as util]))
 
 (def supported-operations
   [:normalize_entity_types

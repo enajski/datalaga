@@ -1,15 +1,15 @@
-(ns datalevin-mcp.mcp.server
+(ns datalaga.mcp.server
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
-            [datalevin-mcp.ingest :as ingest]
-            [datalevin-mcp.memory.maintenance :as maintenance]
-            [datalevin-mcp.memory.queries :as queries]
-            [datalevin-mcp.memory.schema :as memory-schema]
-            [datalevin-mcp.memory.store :as store]
-            [datalevin-mcp.util :as util]))
+            [datalaga.ingest :as ingest]
+            [datalaga.memory.maintenance :as maintenance]
+            [datalaga.memory.queries :as queries]
+            [datalaga.memory.schema :as memory-schema]
+            [datalaga.memory.store :as store]
+            [datalaga.util :as util]))
 
 (def protocol-version "2025-03-26")
 
@@ -1321,7 +1321,7 @@
       [(response id {:protocolVersion protocol-version
                      :capabilities {:tools {:listChanged false}
                                     :resources {:listChanged false}}
-                     :serverInfo {:name "datalevin-mcp"
+                     :serverInfo {:name "datalaga"
                                   :version "0.1.0"}
                      :instructions "Structured coding-memory MCP server backed by Datalevin."})
        (reset! initialized? true)]

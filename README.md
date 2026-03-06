@@ -1,4 +1,4 @@
-# Datalevin as Agentic Coding Memory Behind MCP
+# Datalaga: Agentic Coding Memory Behind MCP
 
 This repository is a working exploration of Datalevin as a backend for coding-agent memory exposed through an MCP server. The prototype focuses on a thin, honest vertical slice:
 
@@ -24,13 +24,13 @@ That combination is promising for coding memory where facts and relationships ma
 
 ## Repository Layout
 
-- `src/datalevin_mcp/memory` schema, transaction logic, query logic
-- `src/datalevin_mcp/mcp/server.clj` MCP stdio server (tools + resources)
-- `src/datalevin_mcp/ingest.clj` ingestion and normalization pipeline
-- `src/datalevin_mcp/eval.clj` evaluation harness + MCP smoke test
-- `src/datalevin_mcp/inspect.clj` inspection CLI for debugging memory
-- `src/datalevin_mcp/maintenance.clj` maintenance CLI for normalization/backfill
-- `src/datalevin_mcp/memory/maintenance.clj` shared normalization engine
+- `src/datalaga/memory` schema, transaction logic, query logic
+- `src/datalaga/mcp/server.clj` MCP stdio server (tools + resources)
+- `src/datalaga/ingest.clj` ingestion and normalization pipeline
+- `src/datalaga/eval.clj` evaluation harness + MCP smoke test
+- `src/datalaga/inspect.clj` inspection CLI for debugging memory
+- `src/datalaga/maintenance.clj` maintenance CLI for normalization/backfill
+- `src/datalaga/memory/maintenance.clj` shared normalization engine
 - `examples/seed-data.edn` synthetic but realistic linked coding-memory dataset
 - `eval/report.md` generated evaluation report
 - `docs/architecture.md` architecture details

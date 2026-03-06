@@ -2,4 +2,4 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-exec "$ROOT/bin/clojure-with-dtlv" -M -m datalevin-mcp.eval "$@"
+exec "$ROOT/bin/clojure-with-dtlv" -M -m datalaga.eval "$@"

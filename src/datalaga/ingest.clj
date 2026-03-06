@@ -1,10 +1,10 @@
-(ns datalevin-mcp.ingest
+(ns datalaga.ingest
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
-            [datalevin-mcp.memory.store :as store]
-            [datalevin-mcp.util :as util]))
+            [datalaga.memory.store :as store]
+            [datalaga.util :as util]))
 
 (def default-seed-file "examples/seed-data.edn")
 

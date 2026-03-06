@@ -1,8 +1,8 @@
-(ns datalevin-mcp.memory.store
+(ns datalaga.memory.store
   (:require [clojure.string :as str]
             [datalevin.core :as d]
-            [datalevin-mcp.memory.schema :as schema]
-            [datalevin-mcp.util :as util]))
+            [datalaga.memory.schema :as schema]
+            [datalaga.util :as util]))
 
 (def default-db-path ".data/memory")
 

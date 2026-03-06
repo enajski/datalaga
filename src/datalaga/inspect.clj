@@ -1,11 +1,11 @@
-(ns datalevin-mcp.inspect
+(ns datalaga.inspect
   (:require [clojure.pprint :as pprint]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
-            [datalevin-mcp.ingest :as ingest]
-            [datalevin-mcp.memory.queries :as queries]
-            [datalevin-mcp.memory.store :as store]
-            [datalevin-mcp.util :as util]))
+            [datalaga.ingest :as ingest]
+            [datalaga.memory.queries :as queries]
+            [datalaga.memory.store :as store]
+            [datalaga.util :as util]))
 
 (def cli-options
   [["-d" "--db-path PATH" "Path to the Datalevin database directory."

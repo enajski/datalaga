@@ -1,8 +1,8 @@
-(ns datalevin-mcp.memory.queries
+(ns datalaga.memory.queries
   (:require [clojure.set :as set]
-            [datalevin-mcp.memory.schema :as schema]
-            [datalevin-mcp.memory.store :as store]
-            [datalevin-mcp.util :as util]))
+            [datalaga.memory.schema :as schema]
+            [datalaga.memory.store :as store]
+            [datalaga.util :as util]))
 
 (defn- created-at-ms
   [entity]

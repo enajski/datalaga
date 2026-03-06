@@ -5,8 +5,8 @@
         org.clojure/tools.cli {:mvn/version "1.1.230"}
         datalevin/datalevin {:mvn/version "0.9.27"}}
  :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}
- :aliases {:mcp {:main-opts ["-m" "datalevin-mcp.mcp.server"]}
-           :seed {:main-opts ["-m" "datalevin-mcp.ingest"]}
-           :inspect {:main-opts ["-m" "datalevin-mcp.inspect"]}
-           :eval {:main-opts ["-m" "datalevin-mcp.eval"]}
-           :maintenance {:main-opts ["-m" "datalevin-mcp.maintenance"]}}}
+ :aliases {:mcp {:main-opts ["-m" "datalaga.mcp.server"]}
+           :seed {:main-opts ["-m" "datalaga.ingest"]}
+           :inspect {:main-opts ["-m" "datalaga.inspect"]}
+           :eval {:main-opts ["-m" "datalaga.eval"]}
+           :maintenance {:main-opts ["-m" "datalaga.maintenance"]}}}

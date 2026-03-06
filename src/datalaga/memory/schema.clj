@@ -1,4 +1,4 @@
-(ns datalevin-mcp.memory.schema)
+(ns datalaga.memory.schema)
 
 (def schema
   {:entity/id {:db/valueType :db.type/string
