@@ -115,6 +115,34 @@
                       {:attr attr :ref-id ref-id})))
     :else (throw (ex-info "Unsupported ref value" {:attr attr :ref-id ref-id}))))
 
+(defn- ref-id-candidates
+  [value]
+  (cond
+    (nil? value) []
+    (and (vector? value)
+         (= 2 (count value))
+         (= :entity/id (first value))
+         (string? (second value)))
+    [(second value)]
+    (vector? value) (mapcat ref-id-candidates value)
+    (sequential? value) (mapcat ref-id-candidates value)
+    (map? value) (if-let [entity-id (:entity/id value)]
+                   [entity-id]
+                   [])
+    (string? value) [value]
+    :else (throw (ex-info "Unsupported ref value" {:value value}))))
+
+(defn- validate-ref-attrs!
+  [db-value new-ids entity]
+  (doseq [[attr value] entity
+          :when (and (schema/ref-attrs attr) (some? value))
+          ref-id (ref-id-candidates value)]
+    (when-not (or (contains? new-ids ref-id)
+                  (lookup-eid db-value ref-id))
+      (throw (ex-info "Referenced entity does not exist"
+                      {:attr attr
+                       :ref-id ref-id})))))
+
 (defn- resolve-ref-value
   [db-value attr value]
   (if (schema/many-attrs attr)
@@ -169,7 +197,8 @@
         starting-db (db conn)
         new-ids (known-new-ids merged-entities)]
     (doseq [entity merged-entities]
-      (validate-entity! starting-db new-ids entity))
+      (validate-entity! starting-db new-ids entity)
+      (validate-ref-attrs! starting-db new-ids entity))
     (when-let [scalar-tx (seq (keep build-scalar-tx merged-entities))]
       (d/transact! conn scalar-tx))
     (let [db-after-scalars (db conn)]

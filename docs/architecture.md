@@ -34,6 +34,7 @@ The `:entity/body` attribute is full-text indexed and stores normalized searchab
 - two-stage transactions:
   - scalar attrs first
   - ref attrs resolved and transacted second
+- ref prevalidation before writes to fail fast on missing referenced entities and avoid partial scalar-only commits
 - pull/query helpers for project scans and entity fetches
 - full-text helper (`search-body`) used by retrieval flows
 
@@ -96,6 +97,7 @@ Operational semantics implemented in tools:
 - `record_tool_run` infers a friendly run name from the command when omitted, sets `:entity/status` based on `exit_code`, and stores supersession lineage (`:tool-run/supersedes`, `:tool-run/retries-of`).
 - write tools validate allowed arguments strictly to prevent silent acceptance of unsupported fields.
 - tool calls validate required argument presence to fail fast with clear remediation before transaction attempts.
+- `ensure_task` is idempotent for creates and supports updating mutable task metadata (status/summary/priority/description) on existing tasks within the same project.
 - `record_error` defaults `:entity/status` to `:open` (or accepts explicit status).
 - `link_entities` with `link_type = resolved_by` marks the source error as `:resolved` and records the resolving entity in refs.
 - failure-focused views (`recent-failures`, `project-summary`) exclude errors with status `:resolved` or `:closed`.

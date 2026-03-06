@@ -220,6 +220,8 @@
   [conn arguments]
   (let [project-id (:project_id arguments)
         task-id (:task_id arguments)
+        timestamp (or (:timestamp arguments) (util/now-iso))
+        provenance (default-provenance arguments "ensure_task")
         db-value (store/db conn)
         project (store/pull-entity-by-id db-value project-id)
         existing (store/pull-entity-by-id db-value task-id)]
@@ -227,8 +229,7 @@
       (throw (ex-info "Project does not exist" {:project-id project-id})))
     (cond
       (nil? existing)
-      (let [timestamp (or (:timestamp arguments) (util/now-iso))
-            entity (merge (default-provenance arguments "ensure_task")
+      (let [entity (merge provenance
                           {:entity/id task-id
                            :entity/type :task
                            :entity/name (or (:name arguments) task-id)
@@ -248,15 +249,31 @@
         {:created true
          :task (store/pull-entity-by-id (store/db conn) task-id)})
 
-      (not= project-id (entity-project-id existing))
+      (and (entity-project-id existing)
+           (not= project-id (entity-project-id existing)))
       (throw (ex-info "Task exists under a different project"
                       {:task-id task-id
                        :existing-project-id (entity-project-id existing)
                        :project-id project-id}))
 
       :else
-      {:created false
-       :task existing})))
+      (let [entity (merge provenance
+                          {:entity/id task-id
+                           :entity/project project-id
+                           :entity/name (:name arguments)
+                           :entity/summary (:summary arguments)
+                           :entity/body (or (:body arguments)
+                                            (:description arguments)
+                                            (:summary arguments))
+                           :entity/session (:session_id arguments)
+                           :entity/status (some-> (:status arguments) util/->keyword)
+                           :entity/updated-at timestamp
+                           :task/description (:description arguments)
+                           :task/priority (some-> (:priority arguments) util/->keyword)})]
+        (store/transact-entities! conn [entity])
+        {:created false
+         :updated true
+         :task (store/pull-entity-by-id (store/db conn) task-id)}))))
 
 (defn- list-projects!
   [conn]
@@ -623,6 +640,13 @@
            :hint "Create or ensure this project first, then retry the write."
            :suggested_tool "ensure_project"
            :suggested_args {:project_id (:ref-id data)})
+
+    (contains? data :existing-project-id)
+    (assoc data
+           :hint "Task id already exists under a different project. Use a unique task_id or correct project_id."
+           :suggested_tool "ensure_task"
+           :suggested_args {:project_id (:project-id data)
+                            :task_id (str (or (:task-id data) "task:new-id"))})
 
     (= :entity/task (:attr data))
     (assoc data
