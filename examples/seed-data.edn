@@ -1,0 +1,666 @@
+[{:artifact/type :project
+  :entity/id "project:phoenix-auth"
+  :name "Phoenix Auth"
+  :summary "Authentication and session management service for a Clojure web application."
+  :root "/workspace/phoenix-auth"
+  :source "repo-scan"
+  :source-ref "workspace://phoenix-auth"
+  :timestamp "2026-02-20T09:00:00Z"
+  :tags ["auth" "sessions" "identity"]}
+
+ {:artifact/type :file
+  :entity/id "file:src/auth/service.clj"
+  :project/id "project:phoenix-auth"
+  :name "auth.service"
+  :path "src/auth/service.clj"
+  :module "auth.service"
+  :language :clojure
+  :summary "Issues tokens, validates password reset tokens, and coordinates auth state."
+  :source "repo-scan"
+  :source-ref "git:src/auth/service.clj"
+  :timestamp "2026-02-20T09:05:00Z"}
+
+ {:artifact/type :file
+  :entity/id "file:src/auth/session.clj"
+  :project/id "project:phoenix-auth"
+  :name "auth.session"
+  :path "src/auth/session.clj"
+  :module "auth.session"
+  :language :clojure
+  :summary "Persists refresh-session state, revocation metadata, and invalidation helpers."
+  :source "repo-scan"
+  :source-ref "git:src/auth/session.clj"
+  :timestamp "2026-02-20T09:06:00Z"}
+
+ {:artifact/type :file
+  :entity/id "file:src/auth/middleware.clj"
+  :project/id "project:phoenix-auth"
+  :name "auth.middleware"
+  :path "src/auth/middleware.clj"
+  :module "auth.middleware"
+  :language :clojure
+  :summary "Shared request middleware that loads claims and enforces auth requirements."
+  :source "repo-scan"
+  :source-ref "git:src/auth/middleware.clj"
+  :timestamp "2026-02-20T09:07:00Z"}
+
+ {:artifact/type :file
+  :entity/id "file:src/web/login_handler.clj"
+  :project/id "project:phoenix-auth"
+  :name "web.login-handler"
+  :path "src/web/login_handler.clj"
+  :module "web.login-handler"
+  :language :clojure
+  :summary "HTTP login endpoint that prepares claims and creates browser sessions."
+  :source "repo-scan"
+  :source-ref "git:src/web/login_handler.clj"
+  :timestamp "2026-02-20T09:08:00Z"}
+
+ {:artifact/type :file
+  :entity/id "file:test/auth/service_test.clj"
+  :project/id "project:phoenix-auth"
+  :name "auth.service-test"
+  :path "test/auth/service_test.clj"
+  :module "auth.service-test"
+  :language :clojure
+  :summary "Integration-style tests for token issue, refresh rotation, and password reset behavior."
+  :source "repo-scan"
+  :source-ref "git:test/auth/service_test.clj"
+  :timestamp "2026-02-20T09:09:00Z"}
+
+ {:artifact/type :symbol
+  :entity/id "symbol:src/auth/service.clj#issue-token"
+  :project/id "project:phoenix-auth"
+  :file/id "file:src/auth/service.clj"
+  :name "issue-token"
+  :qualified-name "phoenix.auth.service/issue-token"
+  :signature "[user ctx]"
+  :kind :function
+  :summary "Builds access and refresh token pairs."
+  :source "repo-scan"
+  :source-ref "symbol:phoenix.auth.service/issue-token"
+  :timestamp "2026-02-20T09:15:00Z"}
+
+ {:artifact/type :symbol
+  :entity/id "symbol:src/auth/service.clj#password-reset-token-valid?"
+  :project/id "project:phoenix-auth"
+  :file/id "file:src/auth/service.clj"
+  :name "password-reset-token-valid?"
+  :qualified-name "phoenix.auth.service/password-reset-token-valid?"
+  :signature "[db user-id token]"
+  :kind :function
+  :summary "Checks whether a password reset token is still valid."
+  :source "repo-scan"
+  :source-ref "symbol:phoenix.auth.service/password-reset-token-valid?"
+  :timestamp "2026-02-20T09:16:00Z"}
+
+ {:artifact/type :symbol
+  :entity/id "symbol:src/auth/session.clj#refresh-session"
+  :project/id "project:phoenix-auth"
+  :file/id "file:src/auth/session.clj"
+  :name "refresh-session"
+  :qualified-name "phoenix.auth.session/refresh-session"
+  :signature "[db refresh-token ctx]"
+  :kind :function
+  :summary "Rotates refresh sessions and issues a new token pair."
+  :source "repo-scan"
+  :source-ref "symbol:phoenix.auth.session/refresh-session"
+  :timestamp "2026-02-20T09:17:00Z"}
+
+ {:artifact/type :symbol
+  :entity/id "symbol:src/auth/session.clj#invalidate-user-sessions"
+  :project/id "project:phoenix-auth"
+  :file/id "file:src/auth/session.clj"
+  :name "invalidate-user-sessions"
+  :qualified-name "phoenix.auth.session/invalidate-user-sessions"
+  :signature "[db user-id reason]"
+  :kind :function
+  :summary "Marks a user's sessions as invalid after security-sensitive events."
+  :source "repo-scan"
+  :source-ref "symbol:phoenix.auth.session/invalidate-user-sessions"
+  :timestamp "2026-02-20T09:18:00Z"}
+
+ {:artifact/type :symbol
+  :entity/id "symbol:src/auth/middleware.clj#normalize-claims"
+  :project/id "project:phoenix-auth"
+  :file/id "file:src/auth/middleware.clj"
+  :name "normalize-claims"
+  :qualified-name "phoenix.auth.middleware/normalize-claims"
+  :signature "[claims]"
+  :kind :function
+  :summary "Normalizes auth claims into a stable request shape."
+  :source "repo-scan"
+  :source-ref "symbol:phoenix.auth.middleware/normalize-claims"
+  :timestamp "2026-02-20T09:19:00Z"}
+
+ {:artifact/type :symbol
+  :entity/id "symbol:src/auth/middleware.clj#require-auth"
+  :project/id "project:phoenix-auth"
+  :file/id "file:src/auth/middleware.clj"
+  :name "require-auth"
+  :qualified-name "phoenix.auth.middleware/require-auth"
+  :signature "[handler]"
+  :kind :function
+  :summary "Wraps handlers with auth checks."
+  :source "repo-scan"
+  :source-ref "symbol:phoenix.auth.middleware/require-auth"
+  :timestamp "2026-02-20T09:20:00Z"}
+
+ {:artifact/type :symbol
+  :entity/id "symbol:src/web/login_handler.clj#login!"
+  :project/id "project:phoenix-auth"
+  :file/id "file:src/web/login_handler.clj"
+  :name "login!"
+  :qualified-name "phoenix.web.login-handler/login!"
+  :signature "[request]"
+  :kind :function
+  :summary "Handles the login request and seeds the initial claims payload."
+  :source "repo-scan"
+  :source-ref "symbol:phoenix.web.login-handler/login!"
+  :timestamp "2026-02-20T09:21:00Z"}
+
+ {:artifact/type :symbol
+  :entity/id "symbol:test/auth/service_test.clj#refresh-token-rotation-test"
+  :project/id "project:phoenix-auth"
+  :file/id "file:test/auth/service_test.clj"
+  :name "refresh-token-rotation-test"
+  :qualified-name "phoenix.auth.service-test/refresh-token-rotation-test"
+  :signature "[]"
+  :kind :test
+  :summary "Checks that refresh token rotation invalidates the old token and preserves session history."
+  :source "repo-scan"
+  :source-ref "symbol:phoenix.auth.service-test/refresh-token-rotation-test"
+  :timestamp "2026-02-20T09:22:00Z"}
+
+ {:artifact/type :task
+  :entity/id "task:AUTH-155"
+  :project/id "project:phoenix-auth"
+  :name "AUTH-155 Normalize claims in middleware"
+  :description "Move claims normalization out of the login handler so auth-related code paths agree on claim shape."
+  :status :done
+  :priority :medium
+  :touched-file-ids ["file:src/auth/middleware.clj" "file:src/web/login_handler.clj"]
+  :related-symbol-ids ["symbol:src/auth/middleware.clj#normalize-claims" "symbol:src/web/login_handler.clj#login!"]
+  :summary "Middleware now owns claims normalization instead of the login handler."
+  :source "tracker"
+  :source-ref "AUTH-155"
+  :timestamp "2026-02-27T08:30:00Z"
+  :tags ["auth" "middleware" "claims"]}
+
+ {:artifact/type :task
+  :entity/id "task:AUTH-142"
+  :project/id "project:phoenix-auth"
+  :name "AUTH-142 Invalidate refresh sessions after password reset"
+  :description "Ensure password reset invalidates refresh sessions immediately, not only access tokens."
+  :status :done
+  :priority :high
+  :touched-file-ids ["file:src/auth/service.clj" "file:src/auth/session.clj" "file:test/auth/service_test.clj"]
+  :related-symbol-ids ["symbol:src/auth/session.clj#refresh-session" "symbol:src/auth/session.clj#invalidate-user-sessions" "symbol:src/auth/service.clj#password-reset-token-valid?"]
+  :summary "Adds a session generation check to the refresh path and invalidation flow."
+  :source "tracker"
+  :source-ref "AUTH-142"
+  :timestamp "2026-03-01T09:00:00Z"
+  :tags ["auth" "password-reset" "refresh-token"]}
+
+ {:artifact/type :task
+  :entity/id "task:AUTH-160"
+  :project/id "project:phoenix-auth"
+  :name "AUTH-160 Stabilize refresh token rotation integration test"
+  :description "Make the refresh token rotation test deterministic enough for CI."
+  :status :done
+  :priority :medium
+  :touched-file-ids ["file:test/auth/service_test.clj" "file:src/auth/session.clj"]
+  :related-symbol-ids ["symbol:test/auth/service_test.clj#refresh-token-rotation-test" "symbol:src/auth/session.clj#refresh-session"]
+  :summary "Injects a clock fixture into the test harness so token timestamps stop drifting."
+  :source "tracker"
+  :source-ref "AUTH-160"
+  :timestamp "2026-03-03T08:45:00Z"
+  :tags ["tests" "auth" "flake"]}
+
+ {:artifact/type :session
+  :entity/id "session:2026-02-27-claims"
+  :project/id "project:phoenix-auth"
+  :name "Claims normalization session"
+  :agent "codex"
+  :started-at "2026-02-27T08:35:00Z"
+  :ended-at "2026-02-27T10:10:00Z"
+  :summary "Session that fixed inconsistent auth claims normalization."
+  :source "agent-session"
+  :source-ref "session-log://2026-02-27-claims"
+  :timestamp "2026-02-27T08:35:00Z"}
+
+ {:artifact/type :session
+  :entity/id "session:2026-03-01-password-reset"
+  :project/id "project:phoenix-auth"
+  :name "Password reset regression session"
+  :agent "codex"
+  :started-at "2026-03-01T09:05:00Z"
+  :ended-at "2026-03-01T11:20:00Z"
+  :summary "Session that traced stale refresh sessions after password reset."
+  :source "agent-session"
+  :source-ref "session-log://2026-03-01-password-reset"
+  :timestamp "2026-03-01T09:05:00Z"}
+
+ {:artifact/type :session
+  :entity/id "session:2026-03-03-refresh-flake"
+  :project/id "project:phoenix-auth"
+  :name "Refresh rotation flake session"
+  :agent "codex"
+  :started-at "2026-03-03T08:50:00Z"
+  :ended-at "2026-03-03T10:00:00Z"
+  :summary "Session that stabilized the refresh rotation integration test."
+  :source "agent-session"
+  :source-ref "session-log://2026-03-03-refresh-flake"
+  :timestamp "2026-03-03T08:50:00Z"}
+
+ {:artifact/type :tool-run
+  :entity/id "tool-run:claims-e2e-failure"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-02-27-claims"
+  :task/id "task:AUTH-155"
+  :name "Failing claims e2e run"
+  :command "clojure -M:test --focus login-claims"
+  :phase :test
+  :exit-code 1
+  :summary "Login e2e test failed because role claims were normalized only for direct login."
+  :output "expected role=admin but got raw string role after SSO callback path"
+  :touched-file-ids ["file:src/web/login_handler.clj" "file:src/auth/middleware.clj"]
+  :source "tool"
+  :source-ref "tool://claims-e2e-failure"
+  :timestamp "2026-02-27T08:50:00Z"}
+
+ {:artifact/type :tool-run
+  :entity/id "tool-run:password-reset-regression"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Password reset regression run"
+  :command "clojure -M:test --focus password-reset-invalidates-session"
+  :phase :test
+  :exit-code 1
+  :summary "Password reset regression test failed because the stale refresh session still rotated successfully."
+  :output "Assertion failed: refresh token should be rejected after password reset, but session rotated normally"
+  :touched-file-ids ["file:src/auth/service.clj" "file:src/auth/session.clj" "file:test/auth/service_test.clj"]
+  :source "tool"
+  :source-ref "tool://password-reset-regression"
+  :timestamp "2026-03-01T09:18:00Z"}
+
+ {:artifact/type :tool-run
+  :entity/id "tool-run:refresh-rotation-flake"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-03-refresh-flake"
+  :task/id "task:AUTH-160"
+  :name "Refresh rotation flake run"
+  :command "clojure -M:test --focus refresh-token-rotation-test"
+  :phase :test
+  :exit-code 1
+  :summary "Refresh rotation integration test flaked because timestamps in the test drifted between setup and assertion."
+  :output "expected rotated-at to equal frozen clock value, but saw a 14ms delta"
+  :touched-file-ids ["file:test/auth/service_test.clj" "file:src/auth/session.clj"]
+  :source "tool"
+  :source-ref "tool://refresh-rotation-flake"
+  :timestamp "2026-03-03T09:00:00Z"}
+
+ {:artifact/type :error
+  :entity/id "error:claims-missing-role"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-02-27-claims"
+  :task/id "task:AUTH-155"
+  :name "Claims path mismatch"
+  :category :test-failure
+  :summary "SSO callback path skipped the role normalization step."
+  :details "Only login-handler/login! normalized claims, so middleware users received mismatched role formats."
+  :tool-run/id "tool-run:claims-e2e-failure"
+  :related-symbol-ids ["symbol:src/web/login_handler.clj#login!" "symbol:src/auth/middleware.clj#normalize-claims"]
+  :source "tool"
+  :source-ref "tool://claims-e2e-failure#error"
+  :timestamp "2026-02-27T08:51:00Z"}
+
+ {:artifact/type :error
+  :entity/id "error:stale-session-after-reset"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Stale session survives password reset"
+  :category :test-failure
+  :summary "Password reset invalidated access tokens but refresh-session generation was not checked."
+  :details "refresh-session rotated the token pair even after invalidate-user-sessions ran because it only consulted revoked-at for the access token path."
+  :tool-run/id "tool-run:password-reset-regression"
+  :related-symbol-ids ["symbol:src/auth/session.clj#refresh-session" "symbol:src/auth/session.clj#invalidate-user-sessions"]
+  :source "tool"
+  :source-ref "tool://password-reset-regression#error"
+  :timestamp "2026-03-01T09:19:00Z"}
+
+ {:artifact/type :error
+  :entity/id "error:refresh-rotation-flake"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-03-refresh-flake"
+  :task/id "task:AUTH-160"
+  :name "Refresh rotation test flake"
+  :category :test-failure
+  :summary "Clock drift in the test made rotated-at assertions nondeterministic."
+  :details "The test fixture called System/currentTimeMillis directly in one branch while refresh-session used the injected clock."
+  :tool-run/id "tool-run:refresh-rotation-flake"
+  :related-symbol-ids ["symbol:test/auth/service_test.clj#refresh-token-rotation-test" "symbol:src/auth/session.clj#refresh-session"]
+  :source "tool"
+  :source-ref "tool://refresh-rotation-flake#error"
+  :timestamp "2026-03-03T09:01:00Z"}
+
+ {:artifact/type :observation
+  :entity/id "observation:claims-normalized-in-handler"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-02-27-claims"
+  :task/id "task:AUTH-155"
+  :name "Claims normalization lives in login handler"
+  :summary "Claims normalization code only ran in login!, leaving SSO callback requests inconsistent."
+  :detail "normalize-claims existed, but the reusable middleware path did not call it yet."
+  :confidence 85
+  :tool-run/id "tool-run:claims-e2e-failure"
+  :source "analysis"
+  :source-ref "analysis://claims-normalized-in-handler"
+  :timestamp "2026-02-27T09:05:00Z"}
+
+ {:artifact/type :observation
+  :entity/id "observation:refresh-path-skips-generation"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Refresh path skips session generation check"
+  :summary "refresh-session did not compare the stored generation against the revoked generation after password reset."
+  :detail "invalidate-user-sessions bumped a per-user generation, but refresh-session still trusted the refresh token alone."
+  :confidence 95
+  :tool-run/id "tool-run:password-reset-regression"
+  :source "analysis"
+  :source-ref "analysis://refresh-generation-gap"
+  :timestamp "2026-03-01T09:28:00Z"}
+
+ {:artifact/type :observation
+  :entity/id "observation:test-reads-clock-directly"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-03-refresh-flake"
+  :task/id "task:AUTH-160"
+  :name "Test reads the system clock directly"
+  :summary "The flaky refresh-token test mixed an injected clock with a direct system clock read."
+  :detail "The fixture froze time for refresh-session but the assertion helper still read the wall clock."
+  :confidence 90
+  :tool-run/id "tool-run:refresh-rotation-flake"
+  :source "analysis"
+  :source-ref "analysis://clock-drift"
+  :timestamp "2026-03-03T09:10:00Z"}
+
+ {:artifact/type :decision
+  :entity/id "decision:normalize-claims-in-middleware"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-02-27-claims"
+  :task/id "task:AUTH-155"
+  :name "Normalize claims in middleware"
+  :summary "Move claim normalization into auth.middleware so every auth code path sees the same shape."
+  :rationale "Normalization in login! fixed direct login but missed SSO callbacks and background auth refresh flows."
+  :outcome "middleware now owns normalization; login! passes through raw claims"
+  :alternatives ["Keep duplicate normalization in login handler" "Normalize claims in every entry point"]
+  :related-file-ids ["file:src/auth/middleware.clj" "file:src/web/login_handler.clj"]
+  :related-symbol-ids ["symbol:src/auth/middleware.clj#normalize-claims" "symbol:src/web/login_handler.clj#login!"]
+  :source "decision-log"
+  :source-ref "decision://normalize-claims-in-middleware"
+  :timestamp "2026-02-27T09:20:00Z"}
+
+ {:artifact/type :decision
+  :entity/id "decision:check-session-generation-on-refresh"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Check session generation during refresh"
+  :summary "Refresh-session must reject tokens from stale session generations after password reset."
+  :rationale "Password reset already bumped the user session generation, but refresh-session ignored it and kept rotating the token pair."
+  :outcome "refresh-session now reads the session generation and invalidate-user-sessions bumps it consistently"
+  :alternatives ["Only revoke access tokens" "Write a per-refresh-token blacklist"]
+  :related-file-ids ["file:src/auth/service.clj" "file:src/auth/session.clj"]
+  :related-symbol-ids ["symbol:src/auth/session.clj#refresh-session" "symbol:src/auth/session.clj#invalidate-user-sessions"]
+  :source "decision-log"
+  :source-ref "decision://check-session-generation-on-refresh"
+  :timestamp "2026-03-01T09:40:00Z"}
+
+ {:artifact/type :decision
+  :entity/id "decision:inject-clock-into-refresh-tests"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-03-refresh-flake"
+  :task/id "task:AUTH-160"
+  :name "Inject clock into refresh test fixtures"
+  :summary "Use a single injected clock in the refresh token test path."
+  :rationale "The integration test mixed a frozen clock and a live system clock, making assertions racey in CI."
+  :outcome "The test fixture now threads a clock through setup and assertion helpers."
+  :alternatives ["Retry the flaky test in CI" "Increase assertion tolerances"]
+  :related-file-ids ["file:test/auth/service_test.clj" "file:src/auth/session.clj"]
+  :related-symbol-ids ["symbol:test/auth/service_test.clj#refresh-token-rotation-test" "symbol:src/auth/session.clj#refresh-session"]
+  :source "decision-log"
+  :source-ref "decision://inject-clock-into-refresh-tests"
+  :timestamp "2026-03-03T09:20:00Z"}
+
+ {:artifact/type :patch
+  :entity/id "patch:move-claims-normalization"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-02-27-claims"
+  :task/id "task:AUTH-155"
+  :name "Move claims normalization into middleware"
+  :summary "Relocated normalize-claims to middleware and simplified login!."
+  :commit "2f6c1b2"
+  :diff-summary "Added middleware normalization hook, removed duplicated claim shaping from login handler, updated auth request tests."
+  :modified-file-ids ["file:src/auth/middleware.clj" "file:src/web/login_handler.clj"]
+  :modified-symbol-ids ["symbol:src/auth/middleware.clj#normalize-claims" "symbol:src/web/login_handler.clj#login!"]
+  :decision/id "decision:normalize-claims-in-middleware"
+  :tool-run/id "tool-run:claims-e2e-failure"
+  :source "git"
+  :source-ref "commit:2f6c1b2"
+  :timestamp "2026-02-27T09:50:00Z"}
+
+ {:artifact/type :patch
+  :entity/id "patch:refresh-session-generation-check"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Reject stale refresh sessions after password reset"
+  :summary "refresh-session now checks the session generation and test coverage follows the revoked path."
+  :commit "91be77d"
+  :diff-summary "Stored revocation generation in session rows, checked it during refresh rotation, and added regression coverage for password reset."
+  :modified-file-ids ["file:src/auth/service.clj" "file:src/auth/session.clj" "file:test/auth/service_test.clj"]
+  :modified-symbol-ids ["symbol:src/auth/session.clj#refresh-session" "symbol:src/auth/session.clj#invalidate-user-sessions" "symbol:src/auth/service.clj#password-reset-token-valid?"]
+  :decision/id "decision:check-session-generation-on-refresh"
+  :tool-run/id "tool-run:password-reset-regression"
+  :source "git"
+  :source-ref "commit:91be77d"
+  :timestamp "2026-03-01T10:15:00Z"}
+
+ {:artifact/type :patch
+  :entity/id "patch:stabilize-refresh-rotation-test"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-03-refresh-flake"
+  :task/id "task:AUTH-160"
+  :name "Inject a fixed clock into refresh rotation tests"
+  :summary "Threads a fixed clock through the test fixture and refresh-session assertions."
+  :commit "c41a902"
+  :diff-summary "Added a clock fixture helper, removed direct system clock reads, and documented the deterministic test contract."
+  :modified-file-ids ["file:test/auth/service_test.clj" "file:src/auth/session.clj"]
+  :modified-symbol-ids ["symbol:test/auth/service_test.clj#refresh-token-rotation-test" "symbol:src/auth/session.clj#refresh-session"]
+  :decision/id "decision:inject-clock-into-refresh-tests"
+  :tool-run/id "tool-run:refresh-rotation-flake"
+  :source "git"
+  :source-ref "commit:c41a902"
+  :timestamp "2026-03-03T09:40:00Z"}
+
+ {:artifact/type :note
+  :entity/id "note:middleware-rollout-caveat"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-02-27-claims"
+  :task/id "task:AUTH-155"
+  :name "Middleware rollout caveat"
+  :summary "Older websocket handshake code still bypasses the new middleware path."
+  :content "Follow up on websocket handshake auth; it still shapes claims directly and should eventually use auth.middleware/normalize-claims."
+  :ref-ids ["file:src/auth/middleware.clj" "symbol:src/auth/middleware.clj#require-auth"]
+  :source "note"
+  :source-ref "note://middleware-rollout-caveat"
+  :timestamp "2026-02-27T10:05:00Z"}
+
+ {:artifact/type :note
+  :entity/id "note:backfill-session-generation"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Backfill session generation for legacy rows"
+  :summary "Legacy sessions need a backfill so the new generation check does not reject valid rows."
+  :content "Backfill existing session rows with generation=0 before enabling strict rejection in all environments."
+  :ref-ids ["file:src/auth/session.clj" "symbol:src/auth/session.clj#refresh-session"]
+  :source "note"
+  :source-ref "note://backfill-session-generation"
+  :timestamp "2026-03-01T10:35:00Z"}
+
+ {:artifact/type :note
+  :entity/id "note:follow-up-audit-token-revocation"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Audit other token revocation paths"
+  :summary "The password reset fix should be mirrored in admin-forced sign out and MFA reset flows."
+  :content "Audit admin sign-out and MFA reset because they also rely on invalidate-user-sessions and may need the same generation semantics."
+  :ref-ids ["file:src/auth/service.clj" "file:src/auth/session.clj" "symbol:src/auth/session.clj#invalidate-user-sessions"]
+  :source "note"
+  :source-ref "note://audit-token-revocation"
+  :timestamp "2026-03-01T10:50:00Z"}
+
+ {:artifact/type :note
+  :entity/id "note:clock-fixture-adopted"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-03-refresh-flake"
+  :task/id "task:AUTH-160"
+  :name "Clock fixture adopted across auth tests"
+  :summary "The deterministic clock fixture is safe to reuse in future auth integration tests."
+  :content "Reuse the fixed clock helper for token expiry and MFA timeout tests; it removed the 14ms drift in refresh-token-rotation-test."
+  :ref-ids ["file:test/auth/service_test.clj" "symbol:test/auth/service_test.clj#refresh-token-rotation-test"]
+  :source "note"
+  :source-ref "note://clock-fixture-adopted"
+  :timestamp "2026-03-03T09:50:00Z"}
+
+ {:artifact/type :event
+  :entity/id "event:auth-155-patch-landed"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-02-27-claims"
+  :task/id "task:AUTH-155"
+  :name "AUTH-155 patch landed"
+  :kind :patch-landed
+  :summary "Claims normalization moved into middleware."
+  :subject-ids ["task:AUTH-155" "patch:move-claims-normalization" "decision:normalize-claims-in-middleware"]
+  :source "timeline"
+  :source-ref "timeline://auth-155-patch-landed"
+  :timestamp "2026-02-27T09:55:00Z"}
+
+ {:artifact/type :event
+  :entity/id "event:auth-142-failure-detected"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "AUTH-142 failure detected"
+  :kind :failure-detected
+  :summary "Password reset left stale refresh sessions alive."
+  :subject-ids ["task:AUTH-142" "tool-run:password-reset-regression" "error:stale-session-after-reset"]
+  :source "timeline"
+  :source-ref "timeline://auth-142-failure"
+  :timestamp "2026-03-01T09:20:00Z"}
+
+ {:artifact/type :event
+  :entity/id "event:auth-142-patch-landed"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "AUTH-142 patch landed"
+  :kind :patch-landed
+  :summary "Session generation check now rejects stale refresh tokens."
+  :subject-ids ["task:AUTH-142" "patch:refresh-session-generation-check" "decision:check-session-generation-on-refresh"]
+  :source "timeline"
+  :source-ref "timeline://auth-142-patch-landed"
+  :timestamp "2026-03-01T10:20:00Z"}
+
+ {:artifact/type :event
+  :entity/id "event:auth-142-follow-up-note"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "AUTH-142 follow-up logged"
+  :kind :follow-up
+  :summary "Captured migration and audit notes after the patch."
+  :subject-ids ["task:AUTH-142" "note:backfill-session-generation" "note:follow-up-audit-token-revocation"]
+  :source "timeline"
+  :source-ref "timeline://auth-142-follow-up"
+  :timestamp "2026-03-01T10:55:00Z"}
+
+ {:artifact/type :event
+  :entity/id "event:auth-160-failure-detected"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-03-refresh-flake"
+  :task/id "task:AUTH-160"
+  :name "AUTH-160 failure detected"
+  :kind :failure-detected
+  :summary "Refresh token rotation test failed because of clock drift."
+  :subject-ids ["task:AUTH-160" "tool-run:refresh-rotation-flake" "error:refresh-rotation-flake"]
+  :source "timeline"
+  :source-ref "timeline://auth-160-failure"
+  :timestamp "2026-03-03T09:02:00Z"}
+
+ {:artifact/type :event
+  :entity/id "event:auth-160-patch-landed"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-03-refresh-flake"
+  :task/id "task:AUTH-160"
+  :name "AUTH-160 patch landed"
+  :kind :patch-landed
+  :summary "Clock fixture landed and the flaky test stabilized."
+  :subject-ids ["task:AUTH-160" "patch:stabilize-refresh-rotation-test" "note:clock-fixture-adopted"]
+  :source "timeline"
+  :source-ref "timeline://auth-160-patch-landed"
+  :timestamp "2026-03-03T09:55:00Z"}
+
+ {:artifact/type :link
+  :entity/id "link:error-led-to-claims-decision"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-02-27-claims"
+  :task/id "task:AUTH-155"
+  :name "Claims error motivated middleware decision"
+  :link-type :motivated
+  :summary "The failing claims test directly motivated the middleware normalization decision."
+  :from/id "error:claims-missing-role"
+  :to/id "decision:normalize-claims-in-middleware"
+  :evidence-ids ["tool-run:claims-e2e-failure" "observation:claims-normalized-in-handler"]
+  :explanation "The error showed the login handler was the only place that normalized claims, so the decision moved it into middleware."
+  :source "linker"
+  :source-ref "link://claims-error-motivated-decision"
+  :timestamp "2026-02-27T09:22:00Z"}
+
+ {:artifact/type :link
+  :entity/id "link:decision-justifies-refresh-patch"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Decision justifies refresh patch"
+  :link-type :justifies
+  :summary "The refresh patch is justified by the session generation decision."
+  :from/id "decision:check-session-generation-on-refresh"
+  :to/id "patch:refresh-session-generation-check"
+  :evidence-ids ["error:stale-session-after-reset" "observation:refresh-path-skips-generation"]
+  :explanation "The patch implemented the chosen generation-check approach after the failing regression and observation confirmed the gap."
+  :source "linker"
+  :source-ref "link://decision-justifies-refresh-patch"
+  :timestamp "2026-03-01T10:16:00Z"}
+
+ {:artifact/type :link
+  :entity/id "link:note-targets-session-file"
+  :project/id "project:phoenix-auth"
+  :session/id "session:2026-03-01-password-reset"
+  :task/id "task:AUTH-142"
+  :name "Backfill note targets session file"
+  :link-type :follow-up-for
+  :summary "The backfill note refers specifically to the session file changed by the patch."
+  :from/id "note:backfill-session-generation"
+  :to/id "file:src/auth/session.clj"
+  :evidence-ids ["patch:refresh-session-generation-check"]
+  :explanation "The follow-up work applies to the new generation columns added in auth.session."
+  :source "linker"
+  :source-ref "link://note-targets-session-file"
+  :timestamp "2026-03-01T10:36:00Z"}]

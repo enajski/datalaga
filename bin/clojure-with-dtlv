@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "x86_64" ]; then
+  LIBOMP_DIR=""
+  for candidate in /opt/local/lib/libomp /usr/local/opt/llvm/lib /usr/local/lib; do
+    if [ -f "$candidate/libomp.dylib" ]; then
+      LIBOMP_DIR="$candidate"
+      break
+    fi
+  done
+
+  if [ -z "$LIBOMP_DIR" ]; then
+    echo "libomp.dylib is required for Datalevin on macOS x86_64. Install it first." >&2
+    echo "Suggested fix: sudo port install libomp" >&2
+    exit 1
+  fi
+
+  mkdir -p "$ROOT/.m2/repository" "$ROOT/.native/dtlv"
+  clojure -P >/dev/null
+
+  NATIVE_JAR="$ROOT/.m2/repository/org/clojars/huahaiy/dtlvnative-macosx-x86_64/0.12.8/dtlvnative-macosx-x86_64-0.12.8.jar"
+  if [ ! -f "$NATIVE_JAR" ]; then
+    echo "Expected Datalevin native jar was not found at $NATIVE_JAR" >&2
+    exit 1
+  fi
+
+  if [ ! -f "$ROOT/.native/dtlv/libdtlv.dylib" ]; then
+    unzip -p "$NATIVE_JAR" datalevin/dtlvnative/macosx-x86_64/libdtlv.dylib > "$ROOT/.native/dtlv/libdtlv.dylib"
+  fi
+
+  if [ ! -f "$ROOT/.native/dtlv/libjniDTLV.dylib" ]; then
+    unzip -p "$NATIVE_JAR" datalevin/dtlvnative/macosx-x86_64/libjniDTLV.dylib > "$ROOT/.native/dtlv/libjniDTLV.dylib"
+  fi
+
+  export DYLD_LIBRARY_PATH="$ROOT/.native/dtlv:$LIBOMP_DIR${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+fi
+
+exec clojure "$@"

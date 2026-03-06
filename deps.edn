@@ -1,0 +1,11 @@
+{:paths ["src" "resources"]
+ :mvn/local-repo ".m2/repository"
+ :deps {org.clojure/clojure {:mvn/version "1.12.3"}
+        org.clojure/data.json {:mvn/version "2.5.1"}
+        org.clojure/tools.cli {:mvn/version "1.1.230"}
+        datalevin/datalevin {:mvn/version "0.9.27"}}
+ :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}
+ :aliases {:mcp {:main-opts ["-m" "datalevin-mcp.mcp.server"]}
+           :seed {:main-opts ["-m" "datalevin-mcp.ingest"]}
+           :inspect {:main-opts ["-m" "datalevin-mcp.inspect"]}
+           :eval {:main-opts ["-m" "datalevin-mcp.eval"]}}}

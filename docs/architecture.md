@@ -1,0 +1,130 @@
+# Architecture
+
+## 1. Memory Model
+
+The store uses Datalevin EAV entities with explicit coding-memory types:
+
+- `:project`, `:file`, `:symbol`
+- `:task`, `:session`, `:tool-run`, `:error`, `:observation`
+- `:decision`, `:patch`, `:note`, `:event`, `:link`
+
+Core schema goals:
+
+- append-oriented event capture (`event`, `tool-run`, `error`, `observation`, `note`)
+- explicit provenance (`:entity/source`, `:entity/source-ref`, timestamps)
+- explicit refs for first-class relationships (not inferred from text)
+
+Relationship attributes include:
+
+- `:file/contains-symbols`
+- `:task/touched-files`, `:task/related-symbols`
+- `:patch/modified-files`, `:patch/modified-symbols`, `:patch/decision`, `:patch/tool-run`
+- `:error/tool-run`, `:error/related-symbols`
+- `:note/refers-to`, `:event/subjects`
+- `:link/from`, `:link/to`, `:link/evidence`, `:link/type`
+
+The `:entity/body` attribute is full-text indexed and stores normalized searchable text for hybrid retrieval.
+
+## 2. Storage and Transaction Layer
+
+`memory/store.clj` provides:
+
+- connection lifecycle (`open-conn`, `close!`, `db`)
+- merge/upsert behavior by stable `:entity/id`
+- two-stage transactions:
+  - scalar attrs first
+  - ref attrs resolved and transacted second
+- pull/query helpers for project scans and entity fetches
+- full-text helper (`search-body`) used by retrieval flows
+
+This keeps write logic explicit and debuggable, while preserving a stable identity model required by MCP tools.
+
+## 3. Ingestion and Normalization Flow
+
+`ingest.clj` converts artifact-level records into normalized Datalevin entities.
+
+Input artifacts:
+
+- project/file/symbol metadata
+- task/session definitions
+- tool outputs and failures
+- decisions, patches, notes
+- timeline events and typed links
+
+Normalization behavior:
+
+- each artifact type maps to a deterministic entity shape
+- common fields flow through a shared `base-entity` function
+- ref IDs remain explicit IDs and are resolved in transaction layer
+- searchable `:entity/body` is generated per artifact
+
+Seed flow:
+
+1. load `examples/seed-data.edn`
+2. normalize artifact records into entity maps
+3. transact entities into Datalevin
+
+## 4. MCP Tool Design
+
+`mcp/server.clj` implements a compact stdio JSON-RPC MCP server.
+
+Implemented methods:
+
+- `initialize`, `tools/list`, `tools/call`
+- `resources/list`, `resources/templates/list`, `resources/read`
+
+Tool behavior:
+
+- write tools map to explicit entity transactions:
+  - `remember_fact`, `record_event`, `record_tool_run`, `record_error`, `link_entities`
+- read tools map to high-level query functions:
+  - `search_notes`, `find_related_context`, `get_symbol_memory`, `get_task_timeline`, `summarize_project_memory`
+
+Design principle:
+
+- expose coding-memory operations, not raw Datalevin internals
+
+## 5. Retrieval Strategy
+
+`memory/queries.clj` supports multiple retrieval styles:
+
+- exact lookup by stable IDs/names/paths
+- graph traversal around an anchor entity (`find-related-context`)
+- task/symbol dossier assembly (`get-task-timeline`, `get-symbol-memory`)
+- full-text retrieval from `:entity/body`
+- hybrid retrieval combining text hits and graph neighbors
+
+Notable Datalog-style win:
+
+- `prior-decisions-for-task` joins current task touched files with historical decision related files to retrieve relevant prior decisions.
+
+## 6. Evaluation Harness
+
+`eval.clj` runs reproducible scenarios and compares retrieval modes:
+
+- exact entity lookup
+- graph/EAV traversal
+- full-text search
+- hybrid text + graph
+
+It also runs an MCP smoke test by starting `./bin/start-mcp` and calling:
+
+- `initialize`
+- `tools/list`
+- `tools/call` (`get_task_timeline`)
+- `resources/read` (project summary resource)
+
+Outputs:
+
+- machine-readable summary in stdout
+- markdown report in `eval/report.md`
+
+## 7. Operational Notes
+
+Observed in this environment:
+
+- Datalevin `0.10.7` lacked a usable `macosx-x86_64` native path
+- prototype uses `0.9.27` with wrapper-managed native extraction and `libomp`
+- LMDB operations require running outside strict sandbox constraints
+
+This is the main integration caveat in an otherwise effective local-first prototype.
