@@ -93,6 +93,7 @@ Run housekeeping normalization:
 Implemented tools:
 
 - `ensure_project`
+- `ensure_task`
 - `list_projects`
 - `upsert_code_entity`
 - `search_entities`
@@ -112,6 +113,7 @@ Notable behavior:
 
 - `record_tool_run` infers a readable run name from `command` when `name` is omitted, sets `entity/status` from `exit_code` (`success` or `failed`), and can track replacement lineage via `supersedes_run_ids` / `retries_of_run_ids`.
 - write tools enforce strict argument validation; unsupported fields are rejected with remediation data.
+- tool calls also enforce required argument presence (missing required args are rejected early).
 - `record_error` defaults to `entity/status = open` unless provided explicitly.
 - `link_entities` with `link_type = resolved_by` auto-marks the source error as `resolved` and attaches the resolver run as a reference.
 - `summarize_project_memory` and `memory://project/{project_id}/recent-failures` exclude errors already marked `resolved`/`closed`.
@@ -210,6 +212,7 @@ For all non-trivial coding tasks in this repository, you MUST use the `datalevin
 ### 1) Bootstrap
 - At the start of work, call `list_projects`.
 - If the current repo project is missing, call `ensure_project` with `project_id` and a short summary.
+- If you will write task-scoped records (`task_id` on runs/events/errors/facts), call `ensure_task` first.
 
 ### 2) Read Before Acting
 - Before edits or major analysis, call `summarize_project_memory`.
@@ -221,7 +224,7 @@ For all non-trivial coding tasks in this repository, you MUST use the `datalevin
 ### 3) Write During/After Work
 - Record command executions with `record_tool_run` (build/test/lint/tool output).
 - Use one command per `record_tool_run` entry; do not combine commands with `&&` in a single run record.
-- Do not send unknown tool arguments. MCP calls with unsupported fields are rejected.
+- Do not send unknown or incomplete tool arguments. MCP calls with unsupported fields or missing required fields are rejected.
 - Record failures with `record_error` and link to related runs/symbols.
 - Persist key findings/decisions with `remember_fact` (or `record_event` for timeline milestones).
 - When a fact references files, include `attributes.files` or `attributes.file_paths`; the server will auto-upsert `file:*` entities and attach them via `entity/refs`.

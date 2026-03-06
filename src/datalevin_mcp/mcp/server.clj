@@ -93,8 +93,12 @@
     {:entity/source (or (:source provenance) default-source)
      :entity/source-ref (:source_ref provenance)}))
 
+(declare entity-project-id)
+
 (def tool-allowed-args
   {"ensure_project" #{:project_id :name :summary :body :root :timestamp :provenance}
+   "ensure_task" #{:project_id :task_id :name :summary :body :description :status :priority
+                   :session_id :timestamp :provenance}
    "list_projects" #{}
    "upsert_code_entity" #{:project_id :kind :file_id :file_path :file_name :module :language
                           :symbol_id :symbol_name :qualified_name :signature :symbol_kind
@@ -119,8 +123,43 @@
    "summarize_project_memory" #{:project_id}
    "normalize_project_memory" #{:project_id :mode :operations :max_changes :migration_id :provenance}})
 
+(def tool-required-args
+  {"ensure_project" #{:project_id}
+   "ensure_task" #{:project_id :task_id}
+   "list_projects" #{}
+   "upsert_code_entity" #{:project_id :kind}
+   "search_entities" #{:project_id :query}
+   "remember_fact" #{:entity_id :entity_type}
+   "record_event" #{:event_id :kind :project_id}
+   "record_tool_run" #{:run_id :project_id :command}
+   "record_error" #{:error_id :project_id :summary}
+   "link_entities" #{:link_id :project_id :from_id :to_id :link_type}
+   "search_notes" #{:project_id :query}
+   "find_related_context" #{:entity_id}
+   "get_symbol_memory" #{:symbol_id}
+   "get_task_timeline" #{:task_id}
+   "summarize_project_memory" #{:project_id}
+   "normalize_project_memory" #{:project_id :mode}})
+
+(defn- missing-required-keys
+  [required arguments]
+  (->> required
+       (filter (fn [k]
+                 (let [v (get arguments k)]
+                   (or (nil? v)
+                       (and (string? v) (str/blank? v))))))
+       sort
+       vec))
+
 (defn- validate-tool-arguments!
   [tool-name arguments]
+  (when-let [required (get tool-required-args tool-name)]
+    (let [missing (missing-required-keys required (or arguments {}))]
+      (when (seq missing)
+        (throw (ex-info "Tool is missing required arguments"
+                        {:tool_name tool-name
+                         :missing_required_arguments missing
+                         :required_arguments (->> required sort vec)})))))
   (when-let [allowed (get tool-allowed-args tool-name)]
     (let [incoming (set (keys (or arguments {})))
           unknown (->> incoming (remove allowed) sort vec)]
@@ -176,6 +215,48 @@
         (store/transact-entities! conn [entity])
         {:created true
          :project (store/pull-entity-by-id (store/db conn) project-id)}))))
+
+(defn- ensure-task!
+  [conn arguments]
+  (let [project-id (:project_id arguments)
+        task-id (:task_id arguments)
+        db-value (store/db conn)
+        project (store/pull-entity-by-id db-value project-id)
+        existing (store/pull-entity-by-id db-value task-id)]
+    (when-not project
+      (throw (ex-info "Project does not exist" {:project-id project-id})))
+    (cond
+      (nil? existing)
+      (let [timestamp (or (:timestamp arguments) (util/now-iso))
+            entity (merge (default-provenance arguments "ensure_task")
+                          {:entity/id task-id
+                           :entity/type :task
+                           :entity/name (or (:name arguments) task-id)
+                           :entity/summary (:summary arguments)
+                           :entity/body (or (:body arguments)
+                                            (:description arguments)
+                                            (:summary arguments)
+                                            (str "Task " task-id))
+                           :entity/project project-id
+                           :entity/session (:session_id arguments)
+                           :entity/status (util/->keyword (or (:status arguments) "open"))
+                           :entity/created-at timestamp
+                           :entity/updated-at timestamp
+                           :task/description (:description arguments)
+                           :task/priority (some-> (:priority arguments) util/->keyword)})]
+        (store/transact-entities! conn [entity])
+        {:created true
+         :task (store/pull-entity-by-id (store/db conn) task-id)})
+
+      (not= project-id (entity-project-id existing))
+      (throw (ex-info "Task exists under a different project"
+                      {:task-id task-id
+                       :existing-project-id (entity-project-id existing)
+                       :project-id project-id}))
+
+      :else
+      {:created false
+       :task existing})))
 
 (defn- list-projects!
   [conn]
@@ -512,6 +593,7 @@
   (validate-tool-arguments! tool-name arguments)
   (case tool-name
     "ensure_project" (ensure-project! conn arguments)
+    "ensure_task" (ensure-task! conn arguments)
     "list_projects" (list-projects! conn)
     "upsert_code_entity" (upsert-code-entity! conn arguments)
     "search_entities" (search-entities! conn arguments)
@@ -542,6 +624,13 @@
            :suggested_tool "ensure_project"
            :suggested_args {:project_id (:ref-id data)})
 
+    (= :entity/task (:attr data))
+    (assoc data
+           :hint "Create or ensure this task first, then retry the write."
+           :suggested_tool "ensure_task"
+           :suggested_args {:project_id (or (:project-id data) (:request-project-id data))
+                            :task_id (:ref-id data)})
+
     (:project-id data)
     (assoc data
            :hint "This project was not found. List known projects or create one."
@@ -554,7 +643,7 @@
     (assoc data
            :hint "Referenced symbol does not exist yet. Create/discover symbol ids before linking."
            :suggested_tools ["search_entities" "upsert_code_entity"]
-           :suggested_args {:project_id (:project-id data)
+           :suggested_args {:project_id (or (:project-id data) (:request-project-id data))
                             :query (:ref-id data)
                             :mode "exact"})
 
@@ -575,6 +664,23 @@
                                             :properties {:source {:type "string"}
                                                          :source_ref {:type "string"}}}}
                   :required ["project_id"]}}
+   {:name "ensure_task"
+    :description "Use before writing task-scoped runs/events/errors to create or verify the task entity in a project."
+    :inputSchema {:type "object"
+                  :properties {:project_id {:type "string"}
+                               :task_id {:type "string"}
+                               :name {:type "string"}
+                               :summary {:type "string"}
+                               :body {:type "string"}
+                               :description {:type "string"}
+                               :status {:type "string"}
+                               :priority {:type "string"}
+                               :session_id {:type "string"}
+                               :timestamp {:type "string"}
+                               :provenance {:type "object"
+                                            :properties {:source {:type "string"}
+                                                         :source_ref {:type "string"}}}}
+                  :required ["project_id" "task_id"]}}
    {:name "list_projects"
     :description "Use when project_id is unknown to discover available project memory roots."
     :inputSchema {:type "object"
@@ -882,6 +988,9 @@
       [(response id (tool-error (.getMessage ex)
                                 (with-project-remediation
                                   (merge (ex-data ex)
+                                         {:tool_name (:name params)
+                                          :request-project-id (or (get-in params [:arguments :project_id])
+                                                                  (get-in params [:arguments "project_id"]))}
                                          {:method method}))))
        nil])))
 
