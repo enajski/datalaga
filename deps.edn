@@ -8,4 +8,5 @@
  :aliases {:mcp {:main-opts ["-m" "datalevin-mcp.mcp.server"]}
            :seed {:main-opts ["-m" "datalevin-mcp.ingest"]}
            :inspect {:main-opts ["-m" "datalevin-mcp.inspect"]}
-           :eval {:main-opts ["-m" "datalevin-mcp.eval"]}}}
+           :eval {:main-opts ["-m" "datalevin-mcp.eval"]}
+           :maintenance {:main-opts ["-m" "datalevin-mcp.maintenance"]}}}

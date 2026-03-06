@@ -1,6 +1,6 @@
 # Datalevin MCP Evaluation
 
-Generated on 2026-03-06T15:20:07.513Z.
+Generated on 2026-03-06T17:15:19.566Z.
 
 Recommendation: **fit with caveats**
 
@@ -83,7 +83,7 @@ Expected entities: `decision:check-session-generation-on-refresh`, `error:stale-
 ## MCP Smoke Test
 
 - Protocol version: `2025-03-26`
-- Tools exposed: `10`
+- Tools exposed: `15`
 - Timeline entries returned by `get_task_timeline`: `11`
 - Resource read URI: `memory://project/project:phoenix-auth/summary`
 - Database path: `.data/memory`

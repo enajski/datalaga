@@ -81,6 +81,8 @@ Tool behavior:
   - `upsert_code_entity` for file/symbol anchors in non-seeded repos
 - write tools map to explicit entity transactions:
   - `remember_fact`, `record_event`, `record_tool_run`, `record_error`, `link_entities`
+- admin maintenance tool:
+  - `normalize_project_memory` (project-scoped dry-run/apply normalization and backfill)
 - read tools map to high-level query functions:
   - `search_notes`, `find_related_context`, `get_symbol_memory`, `get_task_timeline`, `summarize_project_memory`
 
@@ -95,6 +97,7 @@ Operational semantics implemented in tools:
 - `record_error` defaults `:entity/status` to `:open` (or accepts explicit status).
 - `link_entities` with `link_type = resolved_by` marks the source error as `:resolved` and records the resolving entity in refs.
 - failure-focused views (`recent-failures`, `project-summary`) exclude errors with status `:resolved` or `:closed`.
+- `normalize_project_memory` provides project-scoped housekeeping with operation filters (`normalize_entity_types`, `backfill_error_resolution`, `link_run_supersession`), `max_changes` safety cap, and `migration_id` idempotency via migration event writeback.
 
 Entity type policy:
 
@@ -147,3 +150,9 @@ Observed in this environment:
 - LMDB operations require running outside strict sandbox constraints
 
 This is the main integration caveat in an otherwise effective local-first prototype.
+
+Maintenance strategy:
+
+- normalization/backfill logic is implemented once in `memory/maintenance.clj`
+- exposed through MCP (`normalize_project_memory`) for auditable remote operation
+- also exposed as local CLI (`./bin/normalize-memory`) for deterministic housekeeping in scripts/ops workflows

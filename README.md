@@ -29,6 +29,8 @@ That combination is promising for coding memory where facts and relationships ma
 - `src/datalevin_mcp/ingest.clj` ingestion and normalization pipeline
 - `src/datalevin_mcp/eval.clj` evaluation harness + MCP smoke test
 - `src/datalevin_mcp/inspect.clj` inspection CLI for debugging memory
+- `src/datalevin_mcp/maintenance.clj` maintenance CLI for normalization/backfill
+- `src/datalevin_mcp/memory/maintenance.clj` shared normalization engine
 - `examples/seed-data.edn` synthetic but realistic linked coding-memory dataset
 - `eval/report.md` generated evaluation report
 - `docs/architecture.md` architecture details
@@ -79,6 +81,13 @@ Inspect memory directly:
 ./bin/inspect-memory prior-decisions task:AUTH-160
 ```
 
+Run housekeeping normalization:
+
+```bash
+./bin/normalize-memory --project-id project:yoyo-evolve --mode dry_run
+./bin/normalize-memory --project-id project:yoyo-evolve --mode apply --migration-id migration:v1
+```
+
 ## MCP Surface
 
 Implemented tools:
@@ -97,6 +106,7 @@ Implemented tools:
 - `get_symbol_memory`
 - `get_task_timeline`
 - `summarize_project_memory`
+- `normalize_project_memory` (admin maintenance)
 
 Notable behavior:
 
@@ -104,6 +114,11 @@ Notable behavior:
 - `record_error` defaults to `entity/status = open` unless provided explicitly.
 - `link_entities` with `link_type = resolved_by` auto-marks the source error as `resolved` and attaches the resolver run as a reference.
 - `summarize_project_memory` and `memory://project/{project_id}/recent-failures` exclude errors already marked `resolved`/`closed`.
+- `normalize_project_memory` supports project-scoped `dry_run|apply` housekeeping with operation filters:
+  - `normalize_entity_types`
+  - `backfill_error_resolution`
+  - `link_run_supersession`
+  and writes a maintenance event on apply for auditability.
 
 Exposed resources:
 

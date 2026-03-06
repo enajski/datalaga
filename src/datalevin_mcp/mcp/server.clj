@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
             [datalevin-mcp.ingest :as ingest]
+            [datalevin-mcp.memory.maintenance :as maintenance]
             [datalevin-mcp.memory.queries :as queries]
             [datalevin-mcp.memory.schema :as memory-schema]
             [datalevin-mcp.memory.store :as store]
@@ -459,6 +460,7 @@
                                                          :limit (or (:limit arguments) 12)})
     "get_task_timeline" (queries/get-task-timeline conn {:task-id (:task_id arguments)})
     "summarize_project_memory" (queries/summarize-project-memory conn {:project-id (:project_id arguments)})
+    "normalize_project_memory" (maintenance/normalize-project-memory! conn arguments)
     (throw (ex-info "Unknown tool" {:tool-name tool-name}))))
 
 (defn- with-project-remediation
@@ -666,7 +668,19 @@
     :description "Use at session start to bootstrap context: project counts, recent patches/failures, and active tasks."
     :inputSchema {:type "object"
                   :properties {:project_id {:type "string"}}
-                  :required ["project_id"]}}])
+                  :required ["project_id"]}}
+   {:name "normalize_project_memory"
+    :description "Admin maintenance tool. Use in dry_run first, then apply to normalize legacy types, backfill resolved failures, and link run supersession metadata."
+    :inputSchema {:type "object"
+                  :properties {:project_id {:type "string"}
+                               :mode {:type "string"}
+                               :operations {:type "array" :items {:type "string"}}
+                               :max_changes {:type "integer"}
+                               :migration_id {:type "string"}
+                               :provenance {:type "object"
+                                            :properties {:source {:type "string"}
+                                                         :source_ref {:type "string"}}}}
+                  :required ["project_id" "mode"]}}])
 
 (defn- resource
   [uri name description]
