@@ -228,9 +228,9 @@
     (throw (ex-info "Unknown tool" {:tool-name tool-name}))))
 
 (defn- tools
-  []
-  [{:name "remember_fact"
-    :description "Upsert a memory entity with structured attributes, provenance, and explicit relationships."
+   []
+   [{:name "remember_fact"
+    :description "Use when you need to persist a new or updated structured memory fact with provenance and explicit relationships."
     :inputSchema {:type "object"
                   :properties {:entity_id {:type "string"}
                                :entity_type {:type "string"}
@@ -250,7 +250,7 @@
                                                          :source_ref {:type "string"}}}}
                   :required ["entity_id" "entity_type"]}}
    {:name "record_event"
-    :description "Append a session-scoped event that ties a task, patch, error, or note into a timeline."
+    :description "Use when an important step happened and you want it on the session/task timeline (for example failure detected, patch landed, follow-up logged)."
     :inputSchema {:type "object"
                   :properties {:event_id {:type "string"}
                                :kind {:type "string"}
@@ -266,7 +266,7 @@
                                                          :source_ref {:type "string"}}}}
                   :required ["event_id" "kind" "project_id"]}}
    {:name "record_tool_run"
-    :description "Record a tool invocation, output, exit code, touched files, and provenance."
+    :description "Use immediately after running tests/build/lint/commands to persist command, output, exit code, touched files, and provenance."
     :inputSchema {:type "object"
                   :properties {:run_id {:type "string"}
                                :name {:type "string"}
@@ -285,7 +285,7 @@
                                                          :source_ref {:type "string"}}}}
                   :required ["run_id" "project_id" "command"]}}
    {:name "record_error"
-    :description "Record a failure with its originating tool run, related symbols, and supporting references."
+    :description "Use when a command or test fails and you need to store the failure with originating tool run, related symbols, and supporting references."
     :inputSchema {:type "object"
                   :properties {:error_id {:type "string"}
                                :name {:type "string"}
@@ -304,7 +304,7 @@
                                                          :source_ref {:type "string"}}}}
                   :required ["error_id" "project_id" "summary"]}}
    {:name "link_entities"
-    :description "Create an explicit relationship entity between two existing memory entities."
+    :description "Use when a causal or supporting relationship should be explicit (for example decision justifies patch, error motivated decision)."
     :inputSchema {:type "object"
                   :properties {:link_id {:type "string"}
                                :name {:type "string"}
@@ -323,32 +323,32 @@
                                                          :source_ref {:type "string"}}}}
                   :required ["link_id" "project_id" "from_id" "to_id" "link_type"]}}
    {:name "search_notes"
-    :description "Run full-text note search within a project."
+    :description "Use for broad recall when you have a text query and want note hits within a project."
     :inputSchema {:type "object"
                   :properties {:project_id {:type "string"}
                                :query {:type "string"}
                                :limit {:type "integer"}}
                   :required ["project_id" "query"]}}
    {:name "find_related_context"
-    :description "Traverse the project graph around an entity and return nearby context."
+    :description "Use before editing or debugging an entity to load nearby graph context (tasks, errors, decisions, patches, notes)."
     :inputSchema {:type "object"
                   :properties {:entity_id {:type "string"}
                                :limit {:type "integer"}
                                :hops {:type "integer"}}
                   :required ["entity_id"]}}
    {:name "get_symbol_memory"
-    :description "Return the symbol dossier, including related failures, patches, notes, and decisions."
+    :description "Use when working on a specific symbol and you need its dossier: related failures, patches, notes, decisions, and timeline signals."
     :inputSchema {:type "object"
                   :properties {:symbol_id {:type "string"}
                                :limit {:type "integer"}}
                   :required ["symbol_id"]}}
    {:name "get_task_timeline"
-    :description "Return the ordered timeline from task creation through failures, patches, and follow-up notes."
+    :description "Use when you need the ordered story of a task from failure to analysis to decision to patch to follow-up."
     :inputSchema {:type "object"
                   :properties {:task_id {:type "string"}}
                   :required ["task_id"]}}
    {:name "summarize_project_memory"
-    :description "Summarize project memory counts, recent patches, recent failures, and active tasks."
+    :description "Use at session start to bootstrap context: project counts, recent patches/failures, and active tasks."
     :inputSchema {:type "object"
                   :properties {:project_id {:type "string"}}
                   :required ["project_id"]}}])
