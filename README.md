@@ -9,8 +9,6 @@ This repository is a working exploration of Datalevin as a backend for coding-ag
 
 The goal is to answer one question with evidence: should Datalevin be used for coding-agent memory behind MCP?
 
-Current recommendation from the prototype and evaluation harness: **fit with caveats**.
-
 ## Why Datalevin
 
 Datalevin gives:
@@ -34,7 +32,6 @@ That combination is promising for coding memory where facts and relationships ma
 - `examples/seed-data.edn` synthetic but realistic linked coding-memory dataset
 - `eval/report.md` generated evaluation report
 - `docs/architecture.md` architecture details
-- `docs/next-steps.md` production hardening and alternatives
 
 ## Local Setup
 
@@ -43,8 +40,6 @@ That combination is promising for coding memory where facts and relationships ma
 - Clojure CLI
 - Java 21+
 - On macOS x86_64 only: `libomp` (for Datalevin native dependency)
-  - installed via MacPorts in this environment:
-    - `sudo port install libomp`
 
 ### Dependency + Native Handling
 
@@ -197,7 +192,6 @@ Strengths:
 
 Pain points:
 
-- native dependency friction on macOS x86_64 (Datalevin version and runtime library handling)
 - integration glue is still required between MCP payloads and normalized entities
 - full-text alone underperforms graph traversal for relationship-heavy coding questions
 
@@ -208,12 +202,6 @@ Run `./bin/run-eval` to regenerate:
 - `eval/report.md` with retrieval metrics by scenario
 - MCP smoke test evidence (tools/resources reachable via stdio protocol)
 - recommendation and rationale
-
-The latest run reports:
-
-- graph/EAV traversal avg recall: `0.75`
-- hybrid text + graph avg recall: `0.53`
-- recommendation: **fit with caveats**
 
 ## AGENTS.md Snippet (Enforce datalevin-memory Usage)
 
