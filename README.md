@@ -112,10 +112,22 @@ Implemented tools:
 Notable behavior:
 
 - `record_tool_run` infers a readable run name from `command` when `name` is omitted, sets `entity/status` from `exit_code` (`success` or `failed`), and can track replacement lineage via `supersedes_run_ids` / `retries_of_run_ids`.
+- `record_tool_run` rejects compound shell commands (`&&`, `||`, `;`, `|`) so each run record maps to one executable command.
+- `record_tool_run` accepts `touched_file_paths` in addition to `touched_file_ids`, auto-upserts `file:*` entities for those paths, and returns `normalized_touched_file_refs`.
+- `record_event` accepts `subject_file_paths`, auto-upserts file entities for those paths, and returns `normalized_subject_file_refs`.
+- `record_error` accepts `related_file_paths`, auto-upserts file entities for those paths, and returns `normalized_related_file_refs`.
+- path-based file normalization now defaults to project-scoped file ids: `file:<project_id>:<path>`.
+- `search_entities` applies path-intent ranking for path-like queries (for example `scripts/evolve.sh`), biasing file entities to the top when available.
+- `search_entities` returns file-onboarding guidance on path-like file misses (`suggested_file_id`, `suggested_action=upsert_code_entity`, `suggested_arguments`) when `entity_type=file` and no file match exists.
+- when a path-like file miss corresponds to an existing global `file:*` entity, `search_entities` also returns `existing_file_id` and `existing_file_project_id` to explain the miss and guide re-association/upsert.
 - when `record_tool_run` is called without lineage fields, the server auto-links to the most recent matching run in the same project/task/session (`auto_lineage_inferred` in response).
 - write tools enforce strict argument validation; unsupported fields are rejected with remediation data.
+- unsupported-argument rejections may include `did_you_mean` remediation hints for common mistakes (for example `record_tool_run.status` -> use `exit_code`).
+- tool errors include `error_type` and `retry_bootstrap_recommended` to separate validation fixes from true bootstrap retries.
 - tool calls also enforce required argument presence (missing required args are rejected early).
 - write transactions now prevalidate references before commit, preventing partial entity writes on missing refs.
+- `ensure_task` normalizes statuses (`completed` -> `done`, `in-progress` -> `in_progress`) and active task views treat `done|completed|closed|cancelled` as non-active.
+- `list_projects` is sorted by recent project activity (latest entity update/create), and each project brief includes `project/last-activity-at`.
 - `record_error` defaults to `entity/status = open` unless provided explicitly.
 - `link_entities` with `link_type = resolved_by` auto-marks the source error as `resolved` and attaches the resolver run as a reference.
 - `summarize_project_memory` and `memory://project/{project_id}/recent-failures` exclude errors already marked `resolved`/`closed`.
@@ -124,6 +136,7 @@ Notable behavior:
   - `normalize_entity_types`
   - `backfill_error_resolution`
   - `link_run_supersession`
+  - `scope_file_ids_by_project` (backfill project-scoped `file:<project_id>:<path>` IDs and refs)
   and writes a maintenance event on apply for auditability.
 
 Exposed resources:
@@ -229,6 +242,8 @@ For all non-trivial coding tasks in this repository, you MUST use the `datalevin
 - Use one command per `record_tool_run` entry; do not combine commands with `&&` in a single run record.
 - Do not send unknown or incomplete tool arguments. MCP calls with unsupported fields or missing required fields are rejected.
 - If you rerun the same command for a task/session, keep `command` stable so lineage inference can chain retries automatically (or pass explicit `supersedes_run_ids` / `retries_of_run_ids`).
+- Prefer `touched_file_paths` when file ids are unknown; the server will normalize and upsert file refs for run logging.
+- Prefer `subject_file_paths` / `related_file_paths` when event/error references include files but file ids are unknown.
 - Record failures with `record_error` and link to related runs/symbols.
 - Persist key findings/decisions with `remember_fact` (or `record_event` for timeline milestones).
 - When a fact references files, include `attributes.files` or `attributes.file_paths`; the server will auto-upsert `file:*` entities and attach them via `entity/refs`.
@@ -240,10 +255,16 @@ For all non-trivial coding tasks in this repository, you MUST use the `datalevin
   - what failed/passed,
   - risks,
   - follow-up opportunities.
-- If memory write fails, retry once after `list_projects`/`ensure_project`, then report the failure explicitly.
+- If memory write fails, inspect `error_type` / `retry_bootstrap_recommended` in the error data:
+  - when `retry_bootstrap_recommended=true`, retry once after `list_projects`/`ensure_project` (and `ensure_task` if needed),
+  - when `false` (for example validation errors), fix arguments and retry directly without bootstrap steps.
 
 ### 5) Scope and Quality
 - Keep `project_id` consistent for all writes in a session.
 - Prefer structured fields over blob text.
 - Do not skip memory logging for convenience.
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

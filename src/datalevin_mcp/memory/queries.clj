@@ -63,6 +63,14 @@
   (and (= :error (:entity/type entity))
        (not (contains? #{:resolved :closed} (:entity/status entity)))))
 
+(def closed-task-statuses
+  #{:done :completed :closed :cancelled})
+
+(defn- active-task?
+  [entity]
+  (and (= :task (:entity/type entity))
+       (not (contains? closed-task-statuses (:entity/status entity)))))
+
 (defn exact-lookup
   [conn {:keys [project-id term limit]
          :or {limit 10}}]
@@ -100,8 +108,7 @@
         recent-patches (->> entities (filter #(= :patch (:entity/type %))) sort-desc (take 5) (mapv brief))
         recent-failures (->> entities (filter unresolved-error?) sort-desc (take 5) (mapv brief))
         active-tasks (->> entities
-                          (filter #(and (= :task (:entity/type %))
-                                        (not= :done (:entity/status %))))
+                          (filter active-task?)
                           sort-desc
                           (mapv brief))]
     {:project (brief (store/pull-entity-by-id db-value project-id))
@@ -126,8 +133,7 @@
   [conn project-id]
   (let [db-value (store/db conn)]
     (->> (store/project-entities db-value project-id)
-         (filter #(and (= :task (:entity/type %))
-                       (not= :done (:entity/status %))))
+         (filter active-task?)
          sort-desc
          (mapv brief))))
 

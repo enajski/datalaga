@@ -93,7 +93,7 @@
     {:entity/source (or (:source provenance) default-source)
      :entity/source-ref (:source_ref provenance)}))
 
-(declare entity-project-id)
+(declare entity-project-id normalize-task-status compound-command?)
 
 (def tool-allowed-args
   {"ensure_project" #{:project_id :name :summary :body :root :timestamp :provenance}
@@ -107,12 +107,12 @@
    "remember_fact" #{:entity_id :entity_type :name :summary :body :project_id :session_id :task_id
                      :timestamp :attributes :relationships :provenance}
    "record_event" #{:event_id :kind :name :summary :project_id :session_id :task_id :timestamp
-                    :subject_ids :provenance}
+                    :subject_ids :subject_file_paths :provenance}
    "record_tool_run" #{:run_id :name :summary :body :project_id :session_id :task_id :command :phase
-                       :exit_code :output :touched_file_ids :supersedes_run_ids :retries_of_run_ids
+                       :exit_code :output :touched_file_ids :touched_file_paths :supersedes_run_ids :retries_of_run_ids
                        :timestamp :provenance}
    "record_error" #{:error_id :name :summary :body :details :project_id :session_id :task_id
-                    :tool_run_id :category :status :related_symbol_ids :related_entity_ids
+                    :tool_run_id :category :status :related_symbol_ids :related_entity_ids :related_file_paths
                     :timestamp :provenance}
    "link_entities" #{:link_id :name :summary :body :project_id :session_id :task_id :from_id :to_id
                      :link_type :explanation :evidence_ids :timestamp :provenance}
@@ -164,10 +164,23 @@
     (let [incoming (set (keys (or arguments {})))
           unknown (->> incoming (remove allowed) sort vec)]
       (when (seq unknown)
-        (throw (ex-info "Tool received unsupported arguments"
-                        {:tool_name tool-name
-                         :unsupported_arguments unknown
-                         :allowed_arguments (->> allowed sort vec)}))))))
+        (let [unsupported-arg-hints
+              {"record_tool_run"
+               {:status {:hint "record_tool_run infers entity status from exit_code."
+                         :recommended-arguments ["exit_code"]}}}
+              did-you-mean (->> unknown
+                                (map (fn [arg]
+                                       (when-let [hint-data (get-in unsupported-arg-hints [tool-name arg])]
+                                         {:argument (name arg)
+                                          :hint (:hint hint-data)
+                                          :recommended_arguments (:recommended-arguments hint-data)})))
+                                (remove nil?)
+                                vec)]
+          (throw (ex-info "Tool received unsupported arguments"
+                          (cond-> {:tool_name tool-name
+                                   :unsupported_arguments unknown
+                                   :allowed_arguments (->> allowed sort vec)}
+                            (seq did-you-mean) (assoc :did_you_mean did-you-mean)))))))))
 
 (defn- transact-and-fetch!
   [conn entity]
@@ -240,7 +253,7 @@
                                             (str "Task " task-id))
                            :entity/project project-id
                            :entity/session (:session_id arguments)
-                           :entity/status (util/->keyword (or (:status arguments) "open"))
+                           :entity/status (normalize-task-status (or (:status arguments) "open"))
                            :entity/created-at timestamp
                            :entity/updated-at timestamp
                            :task/description (:description arguments)
@@ -266,7 +279,7 @@
                                             (:description arguments)
                                             (:summary arguments))
                            :entity/session (:session_id arguments)
-                           :entity/status (some-> (:status arguments) util/->keyword)
+                           :entity/status (some-> (:status arguments) normalize-task-status)
                            :entity/updated-at timestamp
                            :task/description (:description arguments)
                            :task/priority (some-> (:priority arguments) util/->keyword)})]
@@ -277,11 +290,30 @@
 
 (defn- list-projects!
   [conn]
-  (let [db-value (store/db conn)]
+  (let [db-value (store/db conn)
+        entity-ts-ms (fn [entity]
+                       (or (some-> (:entity/updated-at entity) .getTime)
+                           (some-> (:entity/created-at entity) .getTime)
+                           Long/MIN_VALUE))
+        project-last-activity (fn [project-id]
+                                (let [project-entities (store/project-entities db-value project-id)
+                                      best-ms (reduce max Long/MIN_VALUE (map entity-ts-ms project-entities))]
+                                  (if (= best-ms Long/MIN_VALUE)
+                                    nil
+                                    (java.util.Date. best-ms))))
+        project-brief (fn [project-id]
+                        (let [project (store/pull-entity-by-id db-value project-id)
+                              last-activity (project-last-activity project-id)]
+                          (cond-> (store/entity-brief project)
+                            last-activity (assoc :project/last-activity-at last-activity))))]
     {:projects (->> (store/all-project-ids db-value)
-                    (store/pull-entities-by-id db-value)
-                    (sort-by :entity/id)
-                    (mapv store/entity-brief))}))
+                    (map project-brief)
+                    (sort-by (fn [project]
+                               [(or (some-> (:project/last-activity-at project) .getTime)
+                                    Long/MIN_VALUE)
+                                (:entity/id project)]))
+                    reverse
+                    vec)}))
 
 (defn- entity-project-id
   [entity]
@@ -289,11 +321,40 @@
       (when (= :project (:entity/type entity))
         (:entity/id entity))))
 
+(defn- bare-file-id?
+  [file-id]
+  (and (string? file-id)
+       (str/starts-with? file-id "file:")
+       (not (str/starts-with? file-id "file:project:"))))
+
+(defn- project-scoped-file-id
+  [project-id file-path]
+  (str "file:" project-id ":" file-path))
+
+(defn- scoped-file-id-project-id
+  [file-id]
+  (some->> file-id
+           (re-matches #"^file:(project:[^:]+):.+$")
+           second))
+
+(defn- file-ref-id->path
+  [file-ref-id]
+  (cond
+    (not (string? file-ref-id)) nil
+    (str/starts-with? file-ref-id "file:project:")
+    (or (some->> file-ref-id
+                 (re-matches #"^file:project:[^:]+:(.+)$")
+                 second)
+        (subs file-ref-id (count "file:")))
+    (str/starts-with? file-ref-id "file:")
+    (subs file-ref-id (count "file:"))
+    :else file-ref-id))
+
 (defn- infer-file-id
-  [{:keys [file_id file_path]}]
+  [{:keys [project_id file_id file_path]}]
   (or file_id
       (when file_path
-        (str "file:" file_path))))
+        (project-scoped-file-id project_id file_path))))
 
 (defn- infer-symbol-id
   [{:keys [symbol_id file_path symbol_name qualified_name]}]
@@ -320,24 +381,152 @@
     :success
     :failed))
 
+(defn- normalize-task-status
+  [raw-status]
+  (let [status (util/->keyword raw-status)]
+    (case status
+      :completed :done
+      :in-progress :in_progress
+      status)))
+
+(defn- compound-command?
+  [command]
+  (boolean (re-find #"(?:&&|\|\||;|\|)" (or command ""))))
+
+(defn- clean-string
+  [value]
+  (let [s (some-> value str str/trim)]
+    (when-not (str/blank? s)
+      s)))
+
+(defn- normalize-file-ref-id
+  [project-id value]
+  (when-let [raw (clean-string value)]
+    (cond
+      (str/starts-with? raw "file:project:") raw
+      (str/starts-with? raw "file:")
+      (if project-id
+        (project-scoped-file-id project-id (file-ref-id->path raw))
+        raw)
+      :else
+      (if project-id
+        (project-scoped-file-id project-id raw)
+        (str "file:" raw)))))
+
+(defn- touched-file-ref-ids
+  [arguments]
+  (let [explicit-ids (->> (util/ensure-vector (:touched_file_ids arguments))
+                          (map #(normalize-file-ref-id (:project_id arguments) %))
+                          (remove nil?))
+        path-derived-ids (->> (util/ensure-vector (:touched_file_paths arguments))
+                              (map #(normalize-file-ref-id (:project_id arguments) %))
+                              (remove nil?))]
+    (->> (concat explicit-ids path-derived-ids)
+         distinct
+         vec)))
+
+(defn- file-entity-from-ref-id
+  [arguments provenance timestamp file-ref-id]
+  (when (str/starts-with? file-ref-id "file:")
+    (let [path (file-ref-id->path file-ref-id)
+          file-project-id (or (scoped-file-id-project-id file-ref-id)
+                              (:project_id arguments))]
+      (merge provenance
+             {:entity/id file-ref-id
+              :entity/type :file
+              :entity/name (.getName (io/file path))
+              :entity/path path
+              :entity/project file-project-id
+              :entity/created-at timestamp
+              :entity/updated-at timestamp
+              :entity/body path}))))
+
 (defn- lower-str
   [value]
   (some-> value str str/lower-case))
 
+(defn- path-intent-query?
+  [query]
+  (let [q (lower-str query)]
+    (boolean
+     (or (str/starts-with? (or q "") "file:")
+         (str/includes? (or q "") "/")
+         (str/includes? (or q "") "\\")
+         (re-find #"\.[a-z0-9]+$" (or q ""))))))
+
+(defn- normalize-search-query
+  [query]
+  (let [q (clean-string query)]
+    (if (and q (str/starts-with? q "file:"))
+      (file-ref-id->path q)
+      q)))
+
+(defn- suggest-file-onboarding
+  [db-value project-id entity-type-filter query matches]
+  (let [normalized-query (normalize-search-query query)]
+    (when (and (= :file entity-type-filter)
+               (empty? matches)
+               (path-intent-query? query)
+               normalized-query)
+      (let [suggested-file-id (project-scoped-file-id project-id normalized-query)
+            legacy-file-id (str "file:" normalized-query)
+            existing-file (or (store/pull-entity-by-id db-value suggested-file-id)
+                              (store/pull-entity-by-id db-value legacy-file-id))
+            common-suggestion {:suggested_file_id suggested-file-id
+                               :suggested_action "upsert_code_entity"
+                               :suggested_arguments {:kind "file"
+                                                     :file_path normalized-query
+                                                     :file_name (.getName (io/file normalized-query))}}]
+        (if (= :file (:entity/type existing-file))
+          (assoc common-suggestion
+                 :existing_file_id (:entity/id existing-file)
+                 :existing_file_project_id (get-in existing-file [:entity/project :entity/id]))
+          common-suggestion)))))
+
+(defn- file-fast-path-matches
+  [db-value project-id query]
+  (let [normalized-query (normalize-search-query query)
+        expected-scoped-id (some-> normalized-query (project-scoped-file-id project-id))
+        expected-legacy-id (some-> normalized-query (str "file:"))]
+    (when (and normalized-query (not (str/blank? normalized-query)))
+      (let [project-files (->> (store/project-entities db-value project-id)
+                               (filter #(= :file (:entity/type %))))]
+        (->> project-files
+             (filter (fn [entity]
+                       (or (= expected-scoped-id (:entity/id entity))
+                           (= expected-legacy-id (:entity/id entity))
+                           (= normalized-query (:entity/path entity))
+                           (= normalized-query (:entity/id entity)))))
+             store/distinct-summaries)))))
+
 (defn- exact-code-query-score
   [query entity]
-  (let [q (lower-str query)
+  (let [q (some-> query normalize-search-query lower-str)
+        path-intent? (path-intent-query? query)
         entity-id (lower-str (:entity/id entity))
         entity-path (lower-str (:entity/path entity))
         entity-name (lower-str (:entity/name entity))
-        qualified-name (lower-str (get entity :symbol/qualified-name))]
+        qualified-name (lower-str (get entity :symbol/qualified-name))
+        base-score (cond
+                     (and q (or (= q entity-id) (= q entity-path) (= q entity-name) (= q qualified-name))) 100
+                     (and q (or (and entity-path (str/includes? entity-path q))
+                                (and entity-id (str/includes? entity-id q))
+                                (and qualified-name (str/includes? qualified-name q)))) 60
+                     (and q entity-name (str/includes? entity-name q)) 40
+                     :else 0)
+        file-bias (if (and path-intent?
+                           (= :file (:entity/type entity))
+                           (pos? base-score))
+                    30
+                    0)]
     (cond
-      (or (= q entity-id) (= q entity-path) (= q entity-name) (= q qualified-name)) 100
-      (or (and entity-path (str/includes? entity-path q))
-          (and entity-id (str/includes? entity-id q))
-          (and qualified-name (str/includes? qualified-name q))) 60
-      (and entity-name (str/includes? entity-name q)) 40
-      :else 0)))
+      (and q
+           path-intent?
+           (= :file (:entity/type entity))
+           (or (= q entity-path) (= q entity-id) (= q (some-> entity-id (str/replace #"^file:" "")))))
+      (+ base-score 80)
+
+      :else (+ base-score file-bias))))
 
 (defn- ranked-search-results
   [query results]
@@ -487,6 +676,9 @@
         mode (util/->keyword (or (:mode arguments) "hybrid"))
         entity-type-filter (some-> (:entity_type arguments) util/->keyword)
         db-value (store/db conn)
+        fast-path-file-results (when (and (= :file entity-type-filter)
+                                          (path-intent-query? query))
+                                 (file-fast-path-matches db-value project-id query))
         raw-results (case mode
                       :exact (queries/exact-lookup conn {:project-id project-id
                                                          :term query
@@ -505,13 +697,23 @@
                                        :supported-modes ["exact" "fulltext" "hybrid"]})))
         maybe-type-filtered (cond->> raw-results
                                entity-type-filter (filter #(= entity-type-filter (:entity/type %))))
-        filtered-results (->> maybe-type-filtered
-                              (ranked-search-results query)
-                              (take limit))]
-    {:project_id project-id
-     :query query
-     :mode (name mode)
-     :matches (mapv store/entity-brief filtered-results)}))
+        base-ranked-results (ranked-search-results query maybe-type-filtered)
+        ranked-results (if (seq fast-path-file-results)
+                         (store/distinct-summaries (concat fast-path-file-results base-ranked-results))
+                         base-ranked-results)
+        relevant-results (if (and (= :file entity-type-filter)
+                                  (path-intent-query? query))
+                           (filter #(pos? (exact-code-query-score query %)) ranked-results)
+                           ranked-results)
+        filtered-results (->> relevant-results
+                              (take limit))
+        response {:project_id project-id
+                  :query query
+                  :mode (name mode)
+                  :matches (mapv store/entity-brief filtered-results)}
+        onboarding-suggestion (suggest-file-onboarding db-value project-id entity-type-filter query filtered-results)]
+    (cond-> response
+      onboarding-suggestion (merge onboarding-suggestion))))
 
 (defn- remember-fact!
   [conn arguments]
@@ -527,7 +729,7 @@
                           (map str)
                           (map str/trim)
                           (remove str/blank?)
-                          (map #(if (str/starts-with? % "file:") % (str "file:" %)))
+                          (map #(normalize-file-ref-id (:project_id arguments) %))
                           distinct
                           vec)
         existing-refs (vec (util/ensure-vector (:entity/refs relationships)))
@@ -539,13 +741,15 @@
         normalized-relationships (cond-> relationships
                                    (seq merged-refs) (assoc :entity/refs merged-refs))
         file-entities (mapv (fn [file-ref-id]
-                              (let [path (subs file-ref-id (count "file:"))]
+                              (let [path (file-ref-id->path file-ref-id)
+                                    file-project-id (or (scoped-file-id-project-id file-ref-id)
+                                                        (:project_id arguments))]
                                 (merge provenance
                                        {:entity/id file-ref-id
                                         :entity/type :file
                                         :entity/name (.getName (io/file path))
                                         :entity/path path
-                                        :entity/project (:project_id arguments)
+                                        :entity/project file-project-id
                                         :entity/created-at timestamp
                                         :entity/updated-at timestamp
                                         :entity/body path})))
@@ -576,75 +780,122 @@
 
 (defn- record-event!
   [conn arguments]
-  (transact-and-fetch!
-   conn
-   (merge (default-provenance arguments "record_event")
-          {:entity/id (:event_id arguments)
-           :entity/type :event
-           :entity/name (or (:name arguments)
-                            (str "event " (:kind arguments)))
-           :entity/summary (:summary arguments)
-           :entity/body (or (:body arguments) (:summary arguments))
-           :entity/project (:project_id arguments)
-           :entity/session (:session_id arguments)
-           :entity/task (:task_id arguments)
-           :entity/created-at (or (:timestamp arguments) (util/now-iso))
-           :entity/updated-at (or (:timestamp arguments) (util/now-iso))
-           :event/kind (util/->keyword (:kind arguments))
-           :event/at (or (:timestamp arguments) (util/now-iso))
-           :event/session (:session_id arguments)
-           :event/subjects (vec (:subject_ids arguments))})))
+  (let [timestamp (or (:timestamp arguments) (util/now-iso))
+        provenance (default-provenance arguments "record_event")
+        subject-file-refs (->> (util/ensure-vector (:subject_file_paths arguments))
+                               (map #(normalize-file-ref-id (:project_id arguments) %))
+                               (remove nil?)
+                               distinct
+                               vec)
+        subject-ids (->> (concat (util/ensure-vector (:subject_ids arguments))
+                                 subject-file-refs)
+                         (map clean-string)
+                         (remove nil?)
+                         distinct
+                         vec)
+        file-entities (->> subject-file-refs
+                           (map #(file-entity-from-ref-id arguments provenance timestamp %))
+                           (remove nil?)
+                           vec)
+        event-entity (merge provenance
+                            {:entity/id (:event_id arguments)
+                             :entity/type :event
+                             :entity/name (or (:name arguments)
+                                              (str "event " (:kind arguments)))
+                             :entity/summary (:summary arguments)
+                             :entity/body (or (:body arguments) (:summary arguments))
+                             :entity/project (:project_id arguments)
+                             :entity/session (:session_id arguments)
+                             :entity/task (:task_id arguments)
+                             :entity/created-at timestamp
+                             :entity/updated-at timestamp
+                             :event/kind (util/->keyword (:kind arguments))
+                             :event/at timestamp
+                             :event/session (:session_id arguments)
+                             :event/subjects subject-ids})]
+    (store/transact-entities! conn (conj file-entities event-entity))
+    {:entity (store/pull-entity-by-id (store/db conn) (:event_id arguments))
+     :normalized_subject_file_refs subject-file-refs}))
 
 (defn- record-tool-run!
   [conn arguments]
+  (when (compound-command? (:command arguments))
+    (throw (ex-info "record_tool_run requires exactly one command"
+                    {:command (:command arguments)
+                     :guidance "Do not combine commands with &&, ||, ;, or |. Record each command as a separate tool run."})))
   (let [lineage (infer-run-lineage conn arguments)
-        result (transact-and-fetch!
-                conn
-                (merge (default-provenance arguments "record_tool_run")
-                       {:entity/id (:run_id arguments)
-                        :entity/type :tool-run
-                        :entity/name (infer-run-name (:command arguments) (:name arguments))
-                        :entity/status (run-status (:exit_code arguments))
-                        :entity/summary (:summary arguments)
-                        :entity/body (or (:body arguments) (:summary arguments) (:output arguments))
-                        :entity/project (:project_id arguments)
-                        :entity/session (:session_id arguments)
-                        :entity/task (:task_id arguments)
-                        :entity/created-at (or (:timestamp arguments) (util/now-iso))
-                        :entity/updated-at (or (:timestamp arguments) (util/now-iso))
-                        :tool-run/command (:command arguments)
-                        :tool-run/phase (util/->keyword (or (:phase arguments) "tool"))
-                        :tool-run/exit-code (long (or (:exit_code arguments) 0))
-                        :tool-run/output (:output arguments)
-                        :tool-run/touched-files (vec (:touched_file_ids arguments))
-                        :tool-run/supersedes (:supersedes lineage)
-                        :tool-run/retries-of (:retries-of lineage)}))]
-    (assoc result :auto_lineage_inferred (:inferred lineage))))
+        timestamp (or (:timestamp arguments) (util/now-iso))
+        provenance (default-provenance arguments "record_tool_run")
+        touched-file-refs (touched-file-ref-ids arguments)
+        file-entities (->> touched-file-refs
+                           (map #(file-entity-from-ref-id arguments provenance timestamp %))
+                           (remove nil?)
+                           vec)
+        run-entity (merge provenance
+                          {:entity/id (:run_id arguments)
+                           :entity/type :tool-run
+                           :entity/name (infer-run-name (:command arguments) (:name arguments))
+                           :entity/status (run-status (:exit_code arguments))
+                           :entity/summary (:summary arguments)
+                           :entity/body (or (:body arguments) (:summary arguments) (:output arguments))
+                           :entity/project (:project_id arguments)
+                           :entity/session (:session_id arguments)
+                           :entity/task (:task_id arguments)
+                           :entity/created-at timestamp
+                           :entity/updated-at timestamp
+                           :tool-run/command (:command arguments)
+                           :tool-run/phase (util/->keyword (or (:phase arguments) "tool"))
+                           :tool-run/exit-code (long (or (:exit_code arguments) 0))
+                           :tool-run/output (:output arguments)
+                           :tool-run/touched-files touched-file-refs
+                           :tool-run/supersedes (:supersedes lineage)
+                           :tool-run/retries-of (:retries-of lineage)})]
+    (store/transact-entities! conn (conj file-entities run-entity))
+    {:entity (store/pull-entity-by-id (store/db conn) (:run_id arguments))
+     :auto_lineage_inferred (:inferred lineage)
+     :normalized_touched_file_refs touched-file-refs}))
 
 (defn- record-error!
   [conn arguments]
-  (let [related-ids (vec (distinct (concat (:related_symbol_ids arguments)
-                                           (:related_entity_ids arguments))))
-        symbol-ids (vec (filter #(str/starts-with? % "symbol:") related-ids))]
-    (transact-and-fetch!
-     conn
-     (merge (default-provenance arguments "record_error")
-            {:entity/id (:error_id arguments)
-             :entity/type :error
-             :entity/name (or (:name arguments) "error")
-             :entity/status (util/->keyword (or (:status arguments) "open"))
-             :entity/summary (:summary arguments)
-             :entity/body (or (:body arguments) (:summary arguments) (:details arguments))
-             :entity/project (:project_id arguments)
-             :entity/session (:session_id arguments)
-             :entity/task (:task_id arguments)
-             :entity/refs related-ids
-             :entity/created-at (or (:timestamp arguments) (util/now-iso))
-             :entity/updated-at (or (:timestamp arguments) (util/now-iso))
-             :error/tool-run (:tool_run_id arguments)
-             :error/category (util/->keyword (or (:category arguments) "error"))
-             :error/details (:details arguments)
-             :error/related-symbols symbol-ids}))))
+  (let [timestamp (or (:timestamp arguments) (util/now-iso))
+        provenance (default-provenance arguments "record_error")
+        related-file-refs (->> (util/ensure-vector (:related_file_paths arguments))
+                               (map #(normalize-file-ref-id (:project_id arguments) %))
+                               (remove nil?)
+                               distinct
+                               vec)
+        related-ids (->> (concat (util/ensure-vector (:related_symbol_ids arguments))
+                                 (util/ensure-vector (:related_entity_ids arguments))
+                                 related-file-refs)
+                         (map clean-string)
+                         (remove nil?)
+                         distinct
+                         vec)
+        symbol-ids (vec (filter #(str/starts-with? % "symbol:") related-ids))
+        file-entities (->> related-file-refs
+                           (map #(file-entity-from-ref-id arguments provenance timestamp %))
+                           (remove nil?)
+                           vec)
+        error-entity (merge provenance
+                            {:entity/id (:error_id arguments)
+                             :entity/type :error
+                             :entity/name (or (:name arguments) "error")
+                             :entity/status (util/->keyword (or (:status arguments) "open"))
+                             :entity/summary (:summary arguments)
+                             :entity/body (or (:body arguments) (:summary arguments) (:details arguments))
+                             :entity/project (:project_id arguments)
+                             :entity/session (:session_id arguments)
+                             :entity/task (:task_id arguments)
+                             :entity/refs related-ids
+                             :entity/created-at timestamp
+                             :entity/updated-at timestamp
+                             :error/tool-run (:tool_run_id arguments)
+                             :error/category (util/->keyword (or (:category arguments) "error"))
+                             :error/details (:details arguments)
+                             :error/related-symbols symbol-ids})]
+    (store/transact-entities! conn (conj file-entities error-entity))
+    {:entity (store/pull-entity-by-id (store/db conn) (:error_id arguments))
+     :normalized_related_file_refs related-file-refs}))
 
 (defn- link-entities!
   [conn arguments]
@@ -745,6 +996,26 @@
                             :mode "exact"})
 
     :else data))
+
+(defn- classify-tool-error
+  [message data]
+  (let [error-type
+        (cond
+          (contains? data :missing_required_arguments) "validation"
+          (contains? data :unsupported_arguments) "validation"
+          (= "Project does not exist" message) "bootstrap_missing_project"
+          (= :entity/project (:attr data)) "bootstrap_missing_project"
+          (and (:project-id data)
+               (not (:tool_name data))
+               (not (:attr data))) "bootstrap_missing_project"
+          (= :entity/task (:attr data)) "bootstrap_missing_task"
+          (contains? data :existing-project-id) "conflict"
+          (= "Unknown tool" message) "unknown_tool"
+          :else "runtime")
+        retry-bootstrap? (contains? #{"bootstrap_missing_project" "bootstrap_missing_task"} error-type)]
+    (assoc data
+           :error_type error-type
+           :retry_bootstrap_recommended retry-bootstrap?)))
 
 (defn- tools
    []
@@ -848,6 +1119,7 @@
                                :task_id {:type "string"}
                                :timestamp {:type "string"}
                                :subject_ids {:type "array" :items {:type "string"}}
+                               :subject_file_paths {:type "array" :items {:type "string"}}
                                :provenance {:type "object"
                                             :properties {:source {:type "string"}
                                                          :source_ref {:type "string"}}}}
@@ -866,6 +1138,7 @@
                                :exit_code {:type "integer"}
                                :output {:type "string"}
                                :touched_file_ids {:type "array" :items {:type "string"}}
+                               :touched_file_paths {:type "array" :items {:type "string"}}
                                :supersedes_run_ids {:type "array" :items {:type "string"}}
                                :retries_of_run_ids {:type "array" :items {:type "string"}}
                                :timestamp {:type "string"}
@@ -888,6 +1161,7 @@
                                :status {:type "string"}
                                :related_symbol_ids {:type "array" :items {:type "string"}}
                                :related_entity_ids {:type "array" :items {:type "string"}}
+                               :related_file_paths {:type "array" :items {:type "string"}}
                                :timestamp {:type "string"}
                                :provenance {:type "object"
                                             :properties {:source {:type "string"}
@@ -1083,12 +1357,13 @@
        nil])
     (catch Exception ex
       [(response id (tool-error (.getMessage ex)
-                                (with-project-remediation
-                                  (merge (ex-data ex)
-                                         {:tool_name (:name params)
-                                          :request-project-id (or (get-in params [:arguments :project_id])
-                                                                  (get-in params [:arguments "project_id"]))}
-                                         {:method method}))))
+                                (-> (merge (ex-data ex)
+                                           {:tool_name (:name params)
+                                            :request-project-id (or (get-in params [:arguments :project_id])
+                                                                    (get-in params [:arguments "project_id"]))}
+                                           {:method method})
+                                    with-project-remediation
+                                    (#(classify-tool-error (.getMessage ex) %)))))
        nil])))
 
 (defn- run-server!

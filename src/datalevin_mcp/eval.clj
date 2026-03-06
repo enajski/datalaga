@@ -243,27 +243,101 @@
                                   :capabilities {}
                                   :clientInfo {:name "eval"
                                                :version "0.1.0"}}})
-      (let [initialize-response (read-json! stdout)]
-        (send-json! stdin {:jsonrpc "2.0"
-                           :method "notifications/initialized"})
-        (send-json! stdin {:jsonrpc "2.0" :id 2 :method "tools/list"})
-        (let [tools-response (read-json! stdout)]
-          (send-json! stdin {:jsonrpc "2.0"
-                             :id 3
-                             :method "tools/call"
-                             :params {:name "get_task_timeline"
-                                      :arguments {:task_id "task:AUTH-142"}}})
-          (let [tool-response (read-json! stdout)]
-            (send-json! stdin {:jsonrpc "2.0"
-                               :id 4
-                               :method "resources/read"
-                               :params {:uri (str "memory://project/" project-id "/summary")}})
-            (let [resource-response (read-json! stdout)]
-              {:initialize initialize-response
-               :tool-count (count (get-in tools-response [:result :tools]))
-               :timeline-items (count (get-in tool-response [:result :structuredContent :timeline]))
-               :resource-uri (get-in resource-response [:result :contents 0 :uri])
-               :stderr (deref stderr-future 1000 "")}))))
+      (let [initialize-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :method "notifications/initialized"})
+            _ (send-json! stdin {:jsonrpc "2.0" :id 2 :method "tools/list"})
+            tools-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :id 3
+                                 :method "tools/call"
+                                 :params {:name "get_task_timeline"
+                                          :arguments {:task_id "task:AUTH-142"}}})
+            tool-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :id 4
+                                 :method "resources/read"
+                                 :params {:uri (str "memory://project/" project-id "/summary")}})
+            resource-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :id 5
+                                 :method "tools/call"
+                                 :params {:name "record_tool_run"
+                                          :arguments {:run_id "run:smoke-paths"
+                                                      :project_id project-id
+                                                      :command "bash -n scripts/evolve.sh"
+                                                      :touched_file_paths ["scripts/evolve.sh"]}}})
+            run-paths-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :id 6
+                                 :method "tools/call"
+                                 :params {:name "record_event"
+                                          :arguments {:event_id "event:smoke-paths"
+                                                      :kind "evaluation"
+                                                      :project_id project-id
+                                                      :subject_file_paths ["docs/next-steps.md"]}}})
+            event-paths-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :id 7
+                                 :method "tools/call"
+                                 :params {:name "record_error"
+                                          :arguments {:error_id "error:smoke-paths"
+                                                      :project_id project-id
+                                                      :summary "smoke path refs"
+                                                      :related_file_paths ["README.md"]}}})
+            error-paths-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :id 8
+                                 :method "tools/call"
+                                 :params {:name "record_tool_run"
+                                          :arguments {:run_id "run:smoke-compound"
+                                                      :project_id project-id
+                                                      :command "git add -A && git commit -m x"}}})
+            compound-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :id 9
+                                 :method "tools/call"
+                                 :params {:name "ensure_task"
+                                          :arguments {:project_id project-id
+                                                      :task_id "task:SMOKE-COMPLETED"
+                                                      :status "completed"}}})
+            _ensure-task-response (read-json! stdout)
+            _ (send-json! stdin {:jsonrpc "2.0"
+                                 :id 10
+                                 :method "tools/call"
+                                 :params {:name "summarize_project_memory"
+                                          :arguments {:project_id project-id}}})
+            summary-response (read-json! stdout)
+            active-task-ids (->> (get-in summary-response [:result :structuredContent :active-tasks])
+                                 (map :entity/id)
+                                 set)
+            scoped-evolve-sh (str "file:" project-id ":scripts/evolve.sh")
+            scoped-next-steps (str "file:" project-id ":docs/next-steps.md")
+            scoped-readme (str "file:" project-id ":README.md")
+            smoke-checks {:tool-run-path-refs (= [scoped-evolve-sh]
+                                                  (get-in run-paths-response
+                                                          [:result :structuredContent :normalized_touched_file_refs]))
+                          :event-path-refs (= [scoped-next-steps]
+                                              (get-in event-paths-response
+                                                      [:result :structuredContent :normalized_subject_file_refs]))
+                          :error-path-refs (= [scoped-readme]
+                                              (get-in error-paths-response
+                                                      [:result :structuredContent :normalized_related_file_refs]))
+                          :compound-run-rejected (true? (get-in compound-response [:result :isError]))
+                          :completed-task-not-active (not (contains? active-task-ids "task:SMOKE-COMPLETED"))}
+            failed-checks (->> smoke-checks
+                               (remove (fn [[_ passed?]] passed?))
+                               (mapv first))]
+        (when (seq failed-checks)
+          (throw (ex-info "MCP smoke contract checks failed"
+                          {:failed-checks failed-checks
+                           :smoke-checks smoke-checks})))
+        {:initialize initialize-response
+         :tool-count (count (get-in tools-response [:result :tools]))
+         :timeline-items (count (get-in tool-response [:result :structuredContent :timeline]))
+         :resource-uri (get-in resource-response [:result :contents 0 :uri])
+         :smoke-checks smoke-checks
+         :stderr (deref stderr-future 1000 "")})
       (finally
         (try (.close stdin) (catch Exception _))
         (try (.close stdout) (catch Exception _))

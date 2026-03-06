@@ -7,7 +7,8 @@
 (def supported-operations
   [:normalize_entity_types
    :backfill_error_resolution
-   :link_run_supersession])
+   :link_run_supersession
+   :scope_file_ids_by_project])
 
 (defn- ref-id
   [value]
@@ -118,6 +119,126 @@
         (first task-matches)
         (first success-runs))))
 
+(defn- bare-file-id?
+  [entity-id]
+  (and (string? entity-id)
+       (str/starts-with? entity-id "file:")
+       (not (str/starts-with? entity-id "file:project:"))))
+
+(defn- file-id->path
+  [file-id]
+  (cond
+    (not (string? file-id)) nil
+    (str/starts-with? file-id "file:project:")
+    (or (some->> file-id
+                 (re-matches #"^file:project:[^:]+:(.+)$")
+                 second)
+        (subs file-id (count "file:")))
+    (str/starts-with? file-id "file:")
+    (subs file-id (count "file:"))
+    :else nil))
+
+(defn- project-scoped-file-id
+  [project-id file-path]
+  (str "file:" project-id ":" file-path))
+
+(defn- collect-file-refs
+  [entity]
+  (reduce (fn [acc attr]
+            (let [value (get entity attr)]
+              (cond
+                (nil? value) acc
+                (schema/many-attrs attr)
+                (into acc (keep ref-id (util/ensure-vector value)))
+                :else
+                (if-let [rid (ref-id value)]
+                  (conj acc rid)
+                  acc))))
+          #{}
+          schema/ref-attrs))
+
+(defn- scoped-file-id-mapping
+  [project-id project-entities]
+  (let [from-file-entities (->> project-entities
+                                (filter #(and (= :file (:entity/type %))
+                                              (bare-file-id? (:entity/id %))))
+                                (map :entity/id))
+        from-refs (->> project-entities
+                       (mapcat collect-file-refs)
+                       (filter bare-file-id?))]
+    (->> (concat from-file-entities from-refs)
+         distinct
+         (map (fn [old-id]
+                [old-id (project-scoped-file-id project-id (file-id->path old-id))]))
+         (into {}))))
+
+(defn- scoped-file-entities
+  [db-value project-id file-id-map]
+  (->> file-id-map
+       (map (fn [[old-id new-id]]
+              (when-not (store/lookup-eid db-value new-id)
+                (let [old-file (store/pull-entity-by-id db-value old-id)
+                      path (file-id->path old-id)
+                      timestamp (util/now-iso)]
+                  {:entity/id new-id
+                   :entity/type :file
+                   :entity/name (or (:entity/name old-file) (.getName (java.io.File. path)))
+                   :entity/path (or (:entity/path old-file) path)
+                   :entity/language (:entity/language old-file)
+                   :entity/summary (:entity/summary old-file)
+                   :entity/body (or (:entity/body old-file) path)
+                   :entity/project project-id
+                   :entity/created-at (or (:entity/created-at old-file) timestamp)
+                   :entity/updated-at timestamp
+                   :entity/source "normalize_project_memory"
+                   :file/module (:file/module old-file)}))))
+       (remove nil?)
+       vec))
+
+(defn- scoped-file-ref-updates
+  [project-entities file-id-map]
+  (->> project-entities
+       (mapcat (fn [entity]
+                 (let [entity-id (:entity/id entity)]
+                   (reduce (fn [acc attr]
+                             (let [value (get entity attr)]
+                               (cond
+                                 (nil? value) acc
+
+                                 (schema/many-attrs attr)
+                                 (let [original (->> (util/ensure-vector value)
+                                                     (map ref-id)
+                                                     (remove nil?)
+                                                     vec)
+                                       mapped (->> original
+                                                   (map #(get file-id-map % %))
+                                                   (remove nil?)
+                                                   distinct
+                                                   vec)]
+                                   (if (and (seq mapped) (not= (set mapped) (set original)))
+                                     (conj acc {:entity/id entity-id
+                                                attr mapped})
+                                     acc))
+
+                                 :else
+                                 (let [rid (ref-id value)
+                                       mapped (get file-id-map rid rid)]
+                                   (if (and rid (not= mapped rid))
+                                     (conj acc {:entity/id entity-id
+                                                attr mapped})
+                                     acc)))))
+                           []
+                           schema/ref-attrs))))
+       vec))
+
+(defn- scope-file-ids-by-project-changes
+  [db-value project-id project-entities]
+  (let [file-id-map (scoped-file-id-mapping project-id project-entities)
+        file-entities (scoped-file-entities db-value project-id file-id-map)
+        ref-updates (scoped-file-ref-updates project-entities file-id-map)]
+    {:entities (vec (concat file-entities ref-updates))
+     :warnings []}))
+
 (defn- backfill-error-resolution-changes
   [db-value project-entities migration-id]
   (let [runs (->> project-entities (filter #(= :tool-run (:entity/type %))))
@@ -190,7 +311,7 @@
             (filter #(= :error (:entity/type %)) project-entities))))
 
 (defn- proposed-changes
-  [db-value project-entities migration-id operations]
+  [db-value project-id project-entities migration-id operations]
   (let [op-set (set operations)
         type-entities (if (contains? op-set :normalize_entity_types)
                         (normalize-entity-type-changes project-entities)
@@ -202,13 +323,19 @@
                             (backfill-error-resolution-changes db-value project-entities migration-id)
                             {:entities []
                              :warnings []})
+        scoped-file-result (if (contains? op-set :scope_file_ids_by_project)
+                             (scope-file-ids-by-project-changes db-value project-id project-entities)
+                             {:entities []
+                              :warnings []})
         by-op {:normalize_entity_types type-entities
                :link_run_supersession supersession-entities
-               :backfill_error_resolution (:entities resolution-result)}
+               :backfill_error_resolution (:entities resolution-result)
+               :scope_file_ids_by_project (:entities scoped-file-result)}
         all-entities (vec (mapcat by-op operations))]
     {:by-op by-op
      :all all-entities
-     :warnings (vec (:warnings resolution-result))}))
+     :warnings (vec (concat (:warnings resolution-result)
+                            (:warnings scoped-file-result)))}))
 
 (defn- op-counts
   [by-op operations]
@@ -250,7 +377,7 @@
        :event_id event-id}
       (let [fresh-db (store/db conn)
             project-entities (store/project-entities fresh-db project-id)
-            {:keys [by-op all warnings]} (proposed-changes fresh-db project-entities migration-id normalized-ops)
+            {:keys [by-op all warnings]} (proposed-changes fresh-db project-id project-entities migration-id normalized-ops)
             counts (op-counts by-op normalized-ops)
             total-changes (count all)
             touch-sample (->> all
