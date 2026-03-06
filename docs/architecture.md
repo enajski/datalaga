@@ -75,6 +75,10 @@ Implemented methods:
 
 Tool behavior:
 
+- bootstrap/discovery:
+  - `ensure_project`, `list_projects`, `search_entities`
+- code-entity onboarding:
+  - `upsert_code_entity` for file/symbol anchors in non-seeded repos
 - write tools map to explicit entity transactions:
   - `remember_fact`, `record_event`, `record_tool_run`, `record_error`, `link_entities`
 - read tools map to high-level query functions:
@@ -83,6 +87,14 @@ Tool behavior:
 Design principle:
 
 - expose coding-memory operations, not raw Datalevin internals
+- return actionable remediation hints when project references are missing
+
+Entity type policy:
+
+- known core types are accepted directly
+- unknown unqualified types are normalized to `custom/<type>`
+- unknown qualified types are preserved
+- original custom type intent is retained in `:entity/kind`
 
 ## 5. Retrieval Strategy
 

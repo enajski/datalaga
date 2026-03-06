@@ -6,6 +6,7 @@
             [clojure.tools.cli :refer [parse-opts]]
             [datalevin-mcp.ingest :as ingest]
             [datalevin-mcp.memory.queries :as queries]
+            [datalevin-mcp.memory.schema :as memory-schema]
             [datalevin-mcp.memory.store :as store]
             [datalevin-mcp.util :as util]))
 
@@ -96,17 +97,213 @@
   (store/transact-entities! conn [entity])
   {:entity (store/pull-entity-by-id (store/db conn) (:entity/id entity))})
 
+(defn- normalize-entity-type
+  [raw-entity-type]
+  (let [typed (util/->keyword raw-entity-type)]
+    (cond
+      (memory-schema/entity-types typed)
+      {:entity-type typed
+       :type-policy "core"}
+
+      (namespace typed)
+      {:entity-type typed
+       :entity-kind typed
+       :type-policy "custom-qualified"}
+
+      :else
+      {:entity-type (keyword "custom" (name typed))
+       :entity-kind typed
+       :type-policy "custom-promoted"})))
+
+(defn- ensure-project!
+  [conn arguments]
+  (let [project-id (:project_id arguments)
+        db-value (store/db conn)
+        existing (store/pull-entity-by-id db-value project-id)]
+    (if existing
+      {:created false
+       :project existing}
+      (let [timestamp (or (:timestamp arguments) (util/now-iso))
+            entity (merge (default-provenance arguments "ensure_project")
+                          {:entity/id project-id
+                           :entity/type :project
+                           :entity/name (or (:name arguments) project-id)
+                           :entity/summary (:summary arguments)
+                           :entity/body (or (:body arguments)
+                                            (:summary arguments)
+                                            (str "Project " project-id))
+                           :entity/created-at timestamp
+                           :entity/updated-at timestamp
+                           :project/root (:root arguments)})]
+        (store/transact-entities! conn [entity])
+        {:created true
+         :project (store/pull-entity-by-id (store/db conn) project-id)}))))
+
+(defn- list-projects!
+  [conn]
+  (let [db-value (store/db conn)]
+    {:projects (->> (store/all-project-ids db-value)
+                    (store/pull-entities-by-id db-value)
+                    (sort-by :entity/id)
+                    (mapv store/entity-brief))}))
+
+(defn- entity-project-id
+  [entity]
+  (or (get-in entity [:entity/project :entity/id])
+      (when (= :project (:entity/type entity))
+        (:entity/id entity))))
+
+(defn- infer-file-id
+  [{:keys [file_id file_path]}]
+  (or file_id
+      (when file_path
+        (str "file:" file_path))))
+
+(defn- infer-symbol-id
+  [{:keys [symbol_id file_path symbol_name qualified_name]}]
+  (or symbol_id
+      (when file_path
+        (let [name-part (or symbol_name
+                            (when qualified_name
+                              (last (str/split qualified_name #"/")))
+                            "symbol")]
+          (str "symbol:" file_path "#" name-part)))))
+
+(defn- upsert-code-entity!
+  [conn arguments]
+  (let [project-id (:project_id arguments)
+        kind (util/->keyword (or (:kind arguments) (:entity_type arguments)))
+        timestamp (or (:timestamp arguments) (util/now-iso))
+        provenance (default-provenance arguments "upsert_code_entity")
+        file-id (infer-file-id arguments)
+        symbol-id (infer-symbol-id arguments)
+        file-name (or (:file_name arguments)
+                      (:module arguments)
+                      file-id
+                      "file")
+        symbol-name (or (:symbol_name arguments)
+                        (when-let [q (:qualified_name arguments)]
+                          (last (str/split q #"/")))
+                        symbol-id
+                        "symbol")]
+    (case kind
+      :file
+      (let [target-file-id (or file-id
+                               (throw (ex-info "file_path or file_id is required for kind=file"
+                                               {:kind kind})))
+            file-entity (merge provenance
+                               {:entity/id target-file-id
+                                :entity/type :file
+                                :entity/name file-name
+                                :entity/path (:file_path arguments)
+                                :entity/language (some-> (:language arguments) util/->keyword)
+                                :entity/summary (:summary arguments)
+                                :entity/body (or (:body arguments)
+                                                 (:summary arguments)
+                                                 (:file_path arguments)
+                                                 (:module arguments))
+                                :entity/project project-id
+                                :entity/created-at timestamp
+                                :entity/updated-at timestamp
+                                :file/module (:module arguments)})]
+        (store/transact-entities! conn [file-entity])
+        {:kind "file"
+         :entity (store/pull-entity-by-id (store/db conn) target-file-id)})
+
+      :symbol
+      (let [target-file-id (or file-id
+                               (throw (ex-info "file_path or file_id is required for kind=symbol"
+                                               {:kind kind})))
+            target-symbol-id (or symbol-id
+                                 (throw (ex-info "symbol_id or derivable symbol identity is required for kind=symbol"
+                                                 {:kind kind})))
+            file-entity (merge provenance
+                               {:entity/id target-file-id
+                                :entity/type :file
+                                :entity/name file-name
+                                :entity/path (:file_path arguments)
+                                :entity/language (some-> (:language arguments) util/->keyword)
+                                :entity/summary (:file_summary arguments)
+                                :entity/body (or (:file_body arguments)
+                                                 (:file_summary arguments)
+                                                 (:file_path arguments))
+                                :entity/project project-id
+                                :entity/created-at timestamp
+                                :entity/updated-at timestamp
+                                :file/module (:module arguments)})
+            symbol-entity (merge provenance
+                                 {:entity/id target-symbol-id
+                                  :entity/type :symbol
+                                  :entity/name symbol-name
+                                  :entity/summary (:summary arguments)
+                                  :entity/body (or (:body arguments)
+                                                   (:summary arguments)
+                                                   (:qualified_name arguments)
+                                                   symbol-name)
+                                  :entity/project project-id
+                                  :entity/file target-file-id
+                                  :entity/created-at timestamp
+                                  :entity/updated-at timestamp
+                                  :symbol/file target-file-id
+                                  :symbol/qualified-name (:qualified_name arguments)
+                                  :symbol/signature (:signature arguments)
+                                  :symbol/kind (some-> (:symbol_kind arguments) util/->keyword)})
+            file-link-entity {:entity/id target-file-id
+                              :file/contains-symbols [target-symbol-id]}]
+        (store/transact-entities! conn [file-entity symbol-entity file-link-entity])
+        {:kind "symbol"
+         :symbol (store/pull-entity-by-id (store/db conn) target-symbol-id)
+         :file (store/pull-entity-by-id (store/db conn) target-file-id)})
+
+      (throw (ex-info "Unsupported code entity kind"
+                      {:kind kind
+                       :supported-kinds ["file" "symbol"]})))))
+
+(defn- search-entities!
+  [conn arguments]
+  (let [project-id (:project_id arguments)
+        query (:query arguments)
+        limit (or (:limit arguments) 10)
+        mode (util/->keyword (or (:mode arguments) "hybrid"))
+        entity-type-filter (some-> (:entity_type arguments) util/->keyword)
+        db-value (store/db conn)
+        raw-results (case mode
+                      :exact (queries/exact-lookup conn {:project-id project-id
+                                                         :term query
+                                                         :limit limit})
+                      :fulltext (store/search-body db-value query {:limit limit
+                                                                   :predicate #(= project-id (entity-project-id %))})
+                      :hybrid (let [exact (queries/exact-lookup conn {:project-id project-id
+                                                                      :term query
+                                                                      :limit limit})
+                                    fulltext (store/search-body db-value query {:limit limit
+                                                                                :predicate #(= project-id (entity-project-id %))})]
+                                (->> (concat exact fulltext)
+                                     store/distinct-summaries))
+                      (throw (ex-info "Unsupported search mode"
+                                      {:mode mode
+                                       :supported-modes ["exact" "fulltext" "hybrid"]})))
+        filtered-results (cond->> raw-results
+                           entity-type-filter (filter #(= entity-type-filter (:entity/type %)))
+                           true (take limit))]
+    {:project_id project-id
+     :query query
+     :mode (name mode)
+     :matches (mapv store/entity-brief filtered-results)}))
+
 (defn- remember-fact!
   [conn arguments]
   (let [attributes (deep-keywordize (or (:attributes arguments) {}))
         relationships (deep-keywordize (or (:relationships arguments) {}))
         provenance (default-provenance arguments "remember_fact")
         entity-id (:entity_id arguments)
+        {:keys [entity-type entity-kind type-policy]} (normalize-entity-type (:entity_type arguments))
         entity (merge attributes
                       relationships
                       provenance
                       {:entity/id entity-id
-                       :entity/type (util/->keyword (:entity_type arguments))
+                       :entity/type entity-type
+                       :entity/kind (or (:entity/kind attributes) entity-kind)
                        :entity/name (:name arguments)
                        :entity/summary (:summary arguments)
                        :entity/body (or (:entity/body attributes)
@@ -117,8 +314,11 @@
                        :entity/session (:session_id arguments)
                        :entity/task (:task_id arguments)
                        :entity/created-at (or (:timestamp arguments) (util/now-iso))
-                       :entity/updated-at (or (:timestamp arguments) (util/now-iso))})]
-    (transact-and-fetch! conn entity)))
+                       :entity/updated-at (or (:timestamp arguments) (util/now-iso))})
+        result (transact-and-fetch! conn entity)]
+    (assoc result
+           :entity_type_policy type-policy
+           :normalized_entity_type entity-type)))
 
 (defn- record-event!
   [conn arguments]
@@ -210,6 +410,10 @@
 (defn- call-tool!
   [conn tool-name arguments]
   (case tool-name
+    "ensure_project" (ensure-project! conn arguments)
+    "list_projects" (list-projects! conn)
+    "upsert_code_entity" (upsert-code-entity! conn arguments)
+    "search_entities" (search-entities! conn arguments)
     "remember_fact" (remember-fact! conn arguments)
     "record_event" (record-event! conn arguments)
     "record_tool_run" (record-tool-run! conn arguments)
@@ -227,9 +431,87 @@
     "summarize_project_memory" (queries/summarize-project-memory conn {:project-id (:project_id arguments)})
     (throw (ex-info "Unknown tool" {:tool-name tool-name}))))
 
+(defn- with-project-remediation
+  [data]
+  (cond
+    (= :entity/project (:attr data))
+    (assoc data
+           :hint "Create or ensure this project first, then retry the write."
+           :suggested_tool "ensure_project"
+           :suggested_args {:project_id (:ref-id data)})
+
+    (:project-id data)
+    (assoc data
+           :hint "This project was not found. List known projects or create one."
+           :suggested_tools ["list_projects" "ensure_project"]
+           :suggested_args {:project_id (:project-id data)})
+
+    (and (= :entity/refs (:attr data))
+         (string? (:ref-id data))
+         (str/starts-with? (:ref-id data) "symbol:"))
+    (assoc data
+           :hint "Referenced symbol does not exist yet. Create/discover symbol ids before linking."
+           :suggested_tools ["search_entities" "upsert_code_entity"]
+           :suggested_args {:project_id (:project-id data)
+                            :query (:ref-id data)
+                            :mode "exact"})
+
+    :else data))
+
 (defn- tools
    []
-   [{:name "remember_fact"
+   [{:name "ensure_project"
+    :description "Use before first write in a repo to create or verify a project memory root."
+    :inputSchema {:type "object"
+                  :properties {:project_id {:type "string"}
+                               :name {:type "string"}
+                               :summary {:type "string"}
+                               :body {:type "string"}
+                               :root {:type "string"}
+                               :timestamp {:type "string"}
+                               :provenance {:type "object"
+                                            :properties {:source {:type "string"}
+                                                         :source_ref {:type "string"}}}}
+                  :required ["project_id"]}}
+   {:name "list_projects"
+    :description "Use when project_id is unknown to discover available project memory roots."
+    :inputSchema {:type "object"
+                  :properties {}
+                  :additionalProperties false}}
+   {:name "upsert_code_entity"
+    :description "Use to create or update file/symbol entities on demand in non-seeded repositories so graph retrieval can anchor on real code entities."
+    :inputSchema {:type "object"
+                  :properties {:project_id {:type "string"}
+                               :kind {:type "string"}
+                               :file_id {:type "string"}
+                               :file_path {:type "string"}
+                               :file_name {:type "string"}
+                               :module {:type "string"}
+                               :language {:type "string"}
+                               :symbol_id {:type "string"}
+                               :symbol_name {:type "string"}
+                               :qualified_name {:type "string"}
+                               :signature {:type "string"}
+                               :symbol_kind {:type "string"}
+                               :summary {:type "string"}
+                               :body {:type "string"}
+                               :file_summary {:type "string"}
+                               :file_body {:type "string"}
+                               :timestamp {:type "string"}
+                               :provenance {:type "object"
+                                            :properties {:source {:type "string"}
+                                                         :source_ref {:type "string"}}}}
+                  :required ["project_id" "kind"]}}
+   {:name "search_entities"
+    :description "Use to discover entity ids (especially symbols/files) before linking errors, observations, or decisions."
+    :inputSchema {:type "object"
+                  :properties {:project_id {:type "string"}
+                               :query {:type "string"}
+                               :mode {:type "string"}
+                               :entity_type {:type "string"}
+                               :limit {:type "integer"}}
+                  :required ["project_id" "query"]}}
+   {:name "remember_fact"
     :description "Use when you need to persist a new or updated structured memory fact with provenance and explicit relationships."
     :inputSchema {:type "object"
                   :properties {:entity_id {:type "string"}
@@ -481,8 +763,9 @@
        nil])
     (catch Exception ex
       [(response id (tool-error (.getMessage ex)
-                                (merge (ex-data ex)
-                                       {:method method})))
+                                (with-project-remediation
+                                  (merge (ex-data ex)
+                                         {:method method}))))
        nil])))
 
 (defn- run-server!

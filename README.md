@@ -83,6 +83,10 @@ Inspect memory directly:
 
 Implemented tools:
 
+- `ensure_project`
+- `list_projects`
+- `upsert_code_entity`
+- `search_entities`
 - `remember_fact`
 - `record_event`
 - `record_tool_run`
@@ -116,6 +120,19 @@ Example relation chains in the dataset:
 - failing test tool run -> error -> observation -> decision -> patch -> follow-up notes
 - task touched files -> prior decisions related files -> context recommendation
 - file contains symbol -> symbol related failures/patches/decisions/notes
+
+Custom entity type policy:
+
+- core types are stored as-is (for example `project`, `task`, `error`)
+- non-core types with no namespace are promoted to `custom/<type>` (for example `finding` -> `custom/finding`)
+- non-core types with a namespace are kept as provided
+- original custom type is retained in `entity/kind`
+
+Code entity onboarding flow (for non-seeded repos):
+
+1. `upsert_code_entity` for file/symbol anchors as you discover code structure.
+2. `search_entities` to discover valid IDs before creating refs in `record_error`/`link_entities`.
+3. `find_related_context` / `get_symbol_memory` become useful once anchors exist.
 
 ## Query Patterns Demonstrated
 
@@ -156,3 +173,43 @@ The latest run reports:
 - graph/EAV traversal avg recall: `0.75`
 - hybrid text + graph avg recall: `0.53`
 - recommendation: **fit with caveats**
+
+## AGENTS.md Snippet (Enforce datalevin-memory Usage)
+
+Use this snippet in a repo-level `AGENTS.md` to enforce consistent memory behavior:
+
+```md
+## Required MCP Memory Policy (`datalevin-memory`)
+
+For all non-trivial coding tasks in this repository, you MUST use the `datalevin-memory` MCP server.
+
+### 1) Bootstrap
+- At the start of work, call `list_projects`.
+- If the current repo project is missing, call `ensure_project` with `project_id` and a short summary.
+
+### 2) Read Before Acting
+- Before edits or major analysis, call `summarize_project_memory`.
+- When touching a symbol/file/task, load context first with:
+  - `get_symbol_memory` (symbol-focused work),
+  - `find_related_context` (file/entity neighborhood),
+  - `get_task_timeline` (task-focused work), as applicable.
+
+### 3) Write During/After Work
+- Record command executions with `record_tool_run` (build/test/lint/tool output).
+- Record failures with `record_error` and link to related runs/symbols.
+- Persist key findings/decisions with `remember_fact` (or `record_event` for timeline milestones).
+- Create explicit causality with `link_entities` when useful (e.g. error -> decision -> patch).
+
+### 4) End-of-Task Memory Writeback
+- Before final response, store a concise evaluation event containing:
+  - what was checked,
+  - what failed/passed,
+  - risks,
+  - follow-up opportunities.
+- If memory write fails, retry once after `list_projects`/`ensure_project`, then report the failure explicitly.
+
+### 5) Scope and Quality
+- Keep `project_id` consistent for all writes in a session.
+- Prefer structured fields over blob text.
+- Do not skip memory logging for convenience.
+```
