@@ -26,6 +26,19 @@
                    (:entity/id entity)]))
        vec))
 
+(defn- as-int
+  [value default-value]
+  (cond
+    (integer? value) value
+    (number? value) (int value)
+    :else default-value))
+
+(defn- bounded-int
+  [value default-value min-value max-value]
+  (-> (as-int value default-value)
+      (max min-value)
+      (min max-value)))
+
 (defn- entity-project-id
   [entity]
   (or (get-in entity [:entity/project :entity/id])
@@ -242,19 +255,25 @@
                    (mapv brief))}))
 
 (defn search-notes
-  [conn {:keys [project-id project-ids query limit]
-         :or {limit 5}}]
+  [conn {:keys [project-id project-ids query limit offset]
+         :or {limit 5
+              offset 0}}]
   (let [db-value (store/db conn)
+        limit (bounded-int limit 5 1 50)
+        offset (bounded-int offset 0 0 500)
         scope (normalize-project-scope db-value project-id project-ids)
         scoped-note-id-set (->> (scoped-type-entity-ids db-value scope :note)
                                 set)]
     {:project-id project-id
      :project_ids scope
      :query query
+     :limit limit
+     :offset offset
      :matches (->> (store/search-body db-value query {:limit (* 3 limit)
                                                       :predicate #(and (= :note (:entity/type %))
                                                                        (contains? scoped-note-id-set
                                                                                   (:entity/id %)))})
+                   (drop offset)
                    (take limit)
                    (mapv brief))}))
 
@@ -273,10 +292,14 @@
             edge-pairs)))
 
 (defn find-related-context
-  [conn {:keys [entity-id project-ids limit hops]
+  [conn {:keys [entity-id project-ids limit hops offset]
          :or {limit 8
-              hops 2}}]
+              hops 2
+              offset 0}}]
   (let [db-value (store/db conn)
+        limit (bounded-int limit 8 1 100)
+        hops (bounded-int hops 2 1 5)
+        offset (bounded-int offset 0 0 500)
         start (store/pull-entity-by-id db-value entity-id)
         _ (when-not start
             (throw (ex-info "Entity does not exist" {:entity-id entity-id})))
@@ -309,6 +332,9 @@
         by-id (into {} (map (juxt :entity/id identity) (conj related-entities start)))]
     {:start (brief start)
      :project_ids scope
+     :limit limit
+     :offset offset
+     :hops hops
      :related (->> visited
                    (remove (fn [[candidate-id _]] (= candidate-id entity-id)))
                    (map (fn [[candidate-id distance]]
@@ -319,6 +345,7 @@
                    (sort-by (fn [entity]
                               [(:distance entity)
                                (- (or (created-at-ms (get by-id (:entity/id entity))) 0))]))
+                   (drop offset)
                    (take limit)
                    vec)}))
 

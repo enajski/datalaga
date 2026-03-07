@@ -15,6 +15,14 @@
 
 (def protocol-version "2025-03-26")
 
+(def default-max-limit 20)
+(def max-limit 100)
+(def max-offset 1000)
+(def default-memory-query-timeout-ms 1500)
+(def max-memory-query-timeout-ms 10000)
+(def default-memory-query-max-results 200)
+(def max-memory-query-max-results 1000)
+
 (def cli-options
   [["-d" "--db-path PATH" "Path to the Datalevin database directory."
     :default store/default-db-path]
@@ -107,7 +115,7 @@
    "upsert_code_entity" #{:project_id :kind :file_id :file_path :file_name :module :language
                           :symbol_id :symbol_name :qualified_name :signature :symbol_kind
                           :summary :body :file_summary :file_body :timestamp :provenance}
-   "search_entities" #{:project_id :query :mode :entity_type :limit}
+   "search_entities" #{:project_id :query :mode :entity_type :limit :offset}
    "remember_fact" #{:entity_id :entity_type :name :summary :body :project_id :session_id :task_id
                      :timestamp :attributes :relationships :external_refs :provenance}
    "record_event" #{:event_id :kind :name :summary :project_id :session_id :task_id :timestamp
@@ -120,12 +128,12 @@
                     :timestamp :provenance}
    "link_entities" #{:link_id :name :summary :body :project_id :session_id :task_id :from_id :to_id
                      :link_type :explanation :evidence_ids :timestamp :provenance}
-   "search_notes" #{:project_id :project_ids :query :limit}
-   "find_related_context" #{:entity_id :project_ids :limit :hops}
+   "search_notes" #{:project_id :project_ids :query :limit :offset}
+   "find_related_context" #{:entity_id :project_ids :limit :hops :offset}
    "get_symbol_memory" #{:symbol_id :limit}
    "get_task_timeline" #{:task_id}
    "summarize_project_memory" #{:project_id}
-   "memory_query" #{:query_edn :inputs :inputs_edn}
+   "memory_query" #{:query_edn :inputs :inputs_edn :timeout_ms :max_results :offset}
    "memory_pull" #{:entity_id :pattern_edn}
    "normalize_project_memory" #{:project_id :mode :operations :max_changes :migration_id :provenance}})
 
@@ -409,6 +417,19 @@
   (let [s (some-> value str str/trim)]
     (when-not (str/blank? s)
       s)))
+
+(defn- as-int
+  [value default-value]
+  (cond
+    (integer? value) value
+    (number? value) (int value)
+    :else default-value))
+
+(defn- bounded-int
+  [value default-value min-value max-value]
+  (-> (as-int value default-value)
+      (max min-value)
+      (min max-value)))
 
 (defn- parse-edn-value
   [field-name value]
@@ -739,7 +760,8 @@
   [conn arguments]
   (let [project-id (:project_id arguments)
         query (:query arguments)
-        limit (or (:limit arguments) 10)
+        limit (bounded-int (:limit arguments) default-max-limit 1 max-limit)
+        offset (bounded-int (:offset arguments) 0 0 max-offset)
         mode (util/->keyword (or (:mode arguments) "hybrid"))
         entity-type-filter (some-> (:entity_type arguments) util/->keyword)
         db-value (store/db conn)
@@ -773,9 +795,12 @@
                            (filter #(pos? (exact-code-query-score query %)) ranked-results)
                            ranked-results)
         filtered-results (->> relevant-results
+                              (drop offset)
                               (take limit))
         response {:project_id project-id
                   :query query
+                  :limit limit
+                  :offset offset
                   :mode (name mode)
                   :matches (mapv store/entity-brief filtered-results)}
         onboarding-suggestion (suggest-file-onboarding db-value project-id entity-type-filter query filtered-results)]
@@ -1007,10 +1032,40 @@
         inputs (or parsed-inputs (:inputs arguments) [])
         inputs (if (sequential? inputs) (vec inputs) [inputs])
         db-value (store/db conn)
-        results (apply d/q query-form db-value inputs)]
-    {:query query-form
-     :inputs inputs
-     :results results}))
+        timeout-ms (bounded-int (:timeout_ms arguments)
+                                default-memory-query-timeout-ms
+                                50
+                                max-memory-query-timeout-ms)
+        max-results (bounded-int (:max_results arguments)
+                                 default-memory-query-max-results
+                                 1
+                                 max-memory-query-max-results)
+        offset (bounded-int (:offset arguments) 0 0 max-offset)
+        fut (future (apply d/q query-form db-value inputs))
+        timeout-token ::timeout
+        raw-results (deref fut timeout-ms timeout-token)]
+    (when (= timeout-token raw-results)
+      (future-cancel fut)
+      (throw (ex-info "memory_query timed out"
+                      {:timeout_ms timeout-ms})))
+    (let [result-coll? (or (sequential? raw-results) (set? raw-results))
+          result-seq (when result-coll? (seq raw-results))
+          total-count (when result-coll? (count result-seq))
+          paged-results (if result-coll?
+                          (->> result-seq
+                               (drop offset)
+                               (take max-results)
+                               vec)
+                          raw-results)]
+      {:query query-form
+       :inputs inputs
+       :timeout_ms timeout-ms
+       :max_results max-results
+       :offset offset
+       :truncated (when total-count
+                    (> total-count (+ offset max-results)))
+       :total_count total-count
+       :results paged-results})))
 
 (defn- entity-ref
   [entity-id]
@@ -1049,11 +1104,13 @@
     "search_notes" (queries/search-notes conn {:project-id (:project_id arguments)
                                                :project-ids (:project_ids arguments)
                                                :query (:query arguments)
-                                               :limit (or (:limit arguments) 5)})
+                                               :limit (:limit arguments)
+                                               :offset (:offset arguments)})
     "find_related_context" (queries/find-related-context conn {:entity-id (:entity_id arguments)
                                                                :project-ids (:project_ids arguments)
-                                                               :limit (or (:limit arguments) 8)
-                                                               :hops (or (:hops arguments) 2)})
+                                                               :limit (:limit arguments)
+                                                               :offset (:offset arguments)
+                                                               :hops (:hops arguments)})
     "get_symbol_memory" (queries/get-symbol-memory conn {:symbol-id (:symbol_id arguments)
                                                          :limit (or (:limit arguments) 12)})
     "get_task_timeline" (queries/get-task-timeline conn {:task-id (:task_id arguments)})
@@ -1193,7 +1250,8 @@
                                :query {:type "string"}
                                :mode {:type "string"}
                                :entity_type {:type "string"}
-                               :limit {:type "integer"}}
+                               :limit {:type "integer"}
+                               :offset {:type "integer"}}
                   :required ["project_id" "query"]}}
    {:name "remember_fact"
     :description "Use when you need to persist a new or updated structured memory fact with provenance and explicit relationships. If attributes include files/file_paths, the server auto-upserts file:* entities and links them via entity/refs. External refs can be passed in external_refs or attributes.external_refs."
@@ -1302,7 +1360,8 @@
                   :properties {:project_id {:type "string"}
                                :project_ids {:type "array" :items {:type "string"}}
                                :query {:type "string"}
-                               :limit {:type "integer"}}
+                               :limit {:type "integer"}
+                               :offset {:type "integer"}}
                   :required ["query"]}}
    {:name "find_related_context"
     :description "Use before editing or debugging an entity to load nearby graph context (tasks, errors, decisions, patches, notes). project_ids can broaden traversal across related projects."
@@ -1310,6 +1369,7 @@
                   :properties {:entity_id {:type "string"}
                                :project_ids {:type "array" :items {:type "string"}}
                                :limit {:type "integer"}
+                               :offset {:type "integer"}
                                :hops {:type "integer"}}
                   :required ["entity_id"]}}
    {:name "get_symbol_memory"
@@ -1333,7 +1393,10 @@
     :inputSchema {:type "object"
                   :properties {:query_edn {:type "string"}
                                :inputs {:type "array"}
-                               :inputs_edn {:type "string"}}
+                               :inputs_edn {:type "string"}
+                               :timeout_ms {:type "integer"}
+                               :max_results {:type "integer"}
+                               :offset {:type "integer"}}
                   :required ["query_edn"]}}
    {:name "memory_pull"
     :description "Pull an entity with an optional EDN pull pattern. Defaults to the server readable pull pattern."

@@ -123,6 +123,7 @@ Notable behavior:
 - `record_error` accepts `related_file_paths`, auto-upserts file entities for those paths, and returns `normalized_related_file_refs`.
 - path-based file normalization now defaults to project-scoped file ids: `file:<project_id>:<path>`.
 - `search_entities` applies path-intent ranking for path-like queries (for example `scripts/evolve.sh`), biasing file entities to the top when available.
+- `search_entities`, `search_notes`, and `find_related_context` support pagination via `offset` and bounded `limit` defaults to keep responses predictable for agent loops.
 - `search_entities` returns file-onboarding guidance on path-like file misses (`suggested_file_id`, `suggested_action=upsert_code_entity`, `suggested_arguments`) when `entity_type=file` and no file match exists.
 - when a path-like file miss corresponds to an existing global `file:*` entity, `search_entities` also returns `existing_file_id` and `existing_file_project_id` to explain the miss and guide re-association/upsert.
 - when `record_tool_run` is called without lineage fields, the server auto-links to the most recent matching run in the same project/task/session (`auto_lineage_inferred` in response).
@@ -139,6 +140,7 @@ Notable behavior:
 - `summarize_project_memory` and `memory://project/{project_id}/recent-failures` exclude errors already marked `resolved`/`closed`.
 - `remember_fact` auto-normalizes `attributes.files` / `attributes.file_paths` into `file:*` refs, upserts missing file entities, and returns `normalized_file_refs`; `external_refs` (or `attributes.external_refs`) are normalized into `entity/external-refs`.
 - `search_notes` supports `project_ids` for cross-project recall, and `find_related_context` accepts `project_ids` to broaden graph traversal beyond the anchor entity's project.
+- `memory_query` now supports bounded `timeout_ms`, `max_results`, and `offset`, returning `total_count`/`truncated` metadata for collection results.
 - `normalize_project_memory` supports project-scoped `dry_run|apply` housekeeping with operation filters:
   - `normalize_entity_types`
   - `backfill_error_resolution`

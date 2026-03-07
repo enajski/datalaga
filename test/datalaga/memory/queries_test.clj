@@ -148,7 +148,20 @@
                                                    :limit 10})
             hit-ids-cross (set (map :entity/id (:matches hits-cross)))]
         (is (contains? hit-ids-cross "note-hit-p1"))
-        (is (contains? hit-ids-cross "note-hit-p2"))))))
+        (is (contains? hit-ids-cross "note-hit-p2")))
+      (let [paged (queries/search-notes conn {:project-ids ["p1" "p2"]
+                                              :query "login timeout"
+                                              :limit 1
+                                              :offset 1})]
+        (is (= 1 (count (:matches paged))))
+        (is (= 1 (:limit paged)))
+        (is (= 1 (:offset paged))))
+      (let [clamped (queries/search-notes conn {:project-ids ["p1" "p2"]
+                                                :query "login timeout"
+                                                :limit 999
+                                                :offset -10})]
+        (is (= 50 (:limit clamped)))
+        (is (= 0 (:offset clamped)))))))
 
 (deftest find-related-context-defaults-to-start-project-scope
   (with-temp-conn
@@ -186,4 +199,20 @@
         (is (contains? default-ids "sym1"))
         (is (not (contains? default-ids "sym2")))
         (is (contains? cross-ids "note-cross"))
-        (is (contains? cross-ids "sym2"))))))
+        (is (contains? cross-ids "sym2")))
+      (let [paged (queries/find-related-context conn {:entity-id "f1"
+                                                      :project-ids ["p2"]
+                                                      :hops 4
+                                                      :limit 1
+                                                      :offset 1})]
+        (is (= 1 (count (:related paged))))
+        (is (= 1 (:limit paged)))
+        (is (= 1 (:offset paged))))
+      (let [clamped (queries/find-related-context conn {:entity-id "f1"
+                                                        :project-ids ["p2"]
+                                                        :hops 99
+                                                        :limit 999
+                                                        :offset -5})]
+        (is (= 100 (:limit clamped)))
+        (is (= 0 (:offset clamped)))
+        (is (= 5 (:hops clamped)))))))
