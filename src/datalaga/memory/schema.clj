@@ -16,6 +16,8 @@
    :entity/summary {:db/valueType :db.type/string}
    :entity/source {:db/valueType :db.type/string}
    :entity/source-ref {:db/valueType :db.type/string}
+   :entity/external-refs {:db/valueType :db.type/string
+                          :db/cardinality :db.cardinality/many}
    :entity/created-at {:db/valueType :db.type/instant}
    :entity/updated-at {:db/valueType :db.type/instant}
    :entity/tags {:db/valueType :db.type/string
@@ -138,6 +140,7 @@
 
 (def many-attrs
   #{:entity/tags
+    :entity/external-refs
     :entity/refs
     :file/contains-symbols
     :task/touched-files
@@ -205,6 +208,7 @@
    :entity/summary
    :entity/source
    :entity/source-ref
+   :entity/external-refs
    :entity/created-at
    :entity/updated-at
    :entity/tags

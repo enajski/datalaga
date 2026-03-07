@@ -105,7 +105,7 @@
                           :summary :body :file_summary :file_body :timestamp :provenance}
    "search_entities" #{:project_id :query :mode :entity_type :limit}
    "remember_fact" #{:entity_id :entity_type :name :summary :body :project_id :session_id :task_id
-                     :timestamp :attributes :relationships :provenance}
+                     :timestamp :attributes :relationships :external_refs :provenance}
    "record_event" #{:event_id :kind :name :summary :project_id :session_id :task_id :timestamp
                     :subject_ids :subject_file_paths :provenance}
    "record_tool_run" #{:run_id :name :summary :body :project_id :session_id :task_id :command :phase
@@ -116,8 +116,8 @@
                     :timestamp :provenance}
    "link_entities" #{:link_id :name :summary :body :project_id :session_id :task_id :from_id :to_id
                      :link_type :explanation :evidence_ids :timestamp :provenance}
-   "search_notes" #{:project_id :query :limit}
-   "find_related_context" #{:entity_id :limit :hops}
+   "search_notes" #{:project_id :project_ids :query :limit}
+   "find_related_context" #{:entity_id :project_ids :limit :hops}
    "get_symbol_memory" #{:symbol_id :limit}
    "get_task_timeline" #{:task_id}
    "summarize_project_memory" #{:project_id}
@@ -134,7 +134,7 @@
    "record_tool_run" #{:run_id :project_id :command}
    "record_error" #{:error_id :project_id :summary}
    "link_entities" #{:link_id :project_id :from_id :to_id :link_type}
-   "search_notes" #{:project_id :query}
+   "search_notes" #{:query}
    "find_related_context" #{:entity_id}
    "get_symbol_memory" #{:symbol_id}
    "get_task_timeline" #{:task_id}
@@ -398,6 +398,34 @@
   (let [s (some-> value str str/trim)]
     (when-not (str/blank? s)
       s)))
+
+(defn- normalize-external-ref
+  [value]
+  (cond
+    (string? value) (clean-string value)
+    (keyword? value) (name value)
+    (number? value) (str value)
+    (map? value)
+    (let [ref-type (clean-string (or (:type value) (get value "type")))
+          ref-value (clean-string (or (:value value) (get value "value")))
+          ref-url (clean-string (or (:url value) (get value "url")))
+          ref-repo (clean-string (or (:repo value) (get value "repo")))]
+      (cond
+        (and ref-type ref-value) (str ref-type ":" ref-value)
+        (and ref-type ref-url) (str ref-type ":" ref-url)
+        ref-url ref-url
+        ref-repo ref-repo
+        :else (clean-string (json/write-str value))))
+    :else (clean-string (str value))))
+
+(defn- external-ref-values
+  [arguments attributes]
+  (->> (concat (util/ensure-vector (:external_refs arguments))
+               (util/ensure-vector (:external_refs attributes)))
+       (map normalize-external-ref)
+       (remove nil?)
+       distinct
+       vec))
 
 (defn- normalize-file-ref-id
   [project-id value]
@@ -723,6 +751,7 @@
         entity-id (:entity_id arguments)
         {:keys [entity-type entity-kind type-policy]} (normalize-entity-type (:entity_type arguments))
         timestamp (or (:timestamp arguments) (util/now-iso))
+        external-refs (external-ref-values arguments attributes)
         raw-files (concat (util/ensure-vector (:files attributes))
                           (util/ensure-vector (:file_paths attributes)))
         file-ref-ids (->> raw-files
@@ -737,7 +766,7 @@
                          (remove nil?)
                          distinct
                          vec)
-        cleaned-attributes (dissoc attributes :files :file_paths)
+        cleaned-attributes (dissoc attributes :files :file_paths :external_refs)
         normalized-relationships (cond-> relationships
                                    (seq merged-refs) (assoc :entity/refs merged-refs))
         file-entities (mapv (fn [file-ref-id]
@@ -769,6 +798,7 @@
                        :entity/project (:project_id arguments)
                        :entity/session (:session_id arguments)
                        :entity/task (:task_id arguments)
+                       :entity/external-refs external-refs
                        :entity/created-at timestamp
                        :entity/updated-at timestamp})]
     (store/transact-entities! conn (conj file-entities entity))
@@ -776,7 +806,8 @@
     (assoc result
            :entity_type_policy type-policy
            :normalized_entity_type entity-type
-           :normalized_file_refs file-ref-ids))))
+           :normalized_file_refs file-ref-ids
+           :normalized_external_refs external-refs))))
 
 (defn- record-event!
   [conn arguments]
@@ -822,6 +853,7 @@
   (when (compound-command? (:command arguments))
     (throw (ex-info "record_tool_run requires exactly one command"
                     {:command (:command arguments)
+                     :validation_issue :compound_command
                      :guidance "Do not combine commands with &&, ||, ;, or |. Record each command as a separate tool run."})))
   (let [lineage (infer-run-lineage conn arguments)
         timestamp (or (:timestamp arguments) (util/now-iso))
@@ -944,9 +976,11 @@
     "record_error" (record-error! conn arguments)
     "link_entities" (link-entities! conn arguments)
     "search_notes" (queries/search-notes conn {:project-id (:project_id arguments)
+                                               :project-ids (:project_ids arguments)
                                                :query (:query arguments)
                                                :limit (or (:limit arguments) 5)})
     "find_related_context" (queries/find-related-context conn {:entity-id (:entity_id arguments)
+                                                               :project-ids (:project_ids arguments)
                                                                :limit (or (:limit arguments) 8)
                                                                :hops (or (:hops arguments) 2)})
     "get_symbol_memory" (queries/get-symbol-memory conn {:symbol-id (:symbol_id arguments)
@@ -1003,6 +1037,7 @@
         (cond
           (contains? data :missing_required_arguments) "validation"
           (contains? data :unsupported_arguments) "validation"
+          (= :compound_command (:validation_issue data)) "validation"
           (= "Project does not exist" message) "bootstrap_missing_project"
           (= :entity/project (:attr data)) "bootstrap_missing_project"
           (and (:project-id data)
@@ -1088,7 +1123,7 @@
                                :limit {:type "integer"}}
                   :required ["project_id" "query"]}}
    {:name "remember_fact"
-    :description "Use when you need to persist a new or updated structured memory fact with provenance and explicit relationships. If attributes include files/file_paths, the server auto-upserts file:* entities and links them via entity/refs."
+    :description "Use when you need to persist a new or updated structured memory fact with provenance and explicit relationships. If attributes include files/file_paths, the server auto-upserts file:* entities and links them via entity/refs. External refs can be passed in external_refs or attributes.external_refs."
     :inputSchema {:type "object"
                   :properties {:entity_id {:type "string"}
                                :entity_type {:type "string"}
@@ -1103,6 +1138,8 @@
                                             :additionalProperties true}
                                :relationships {:type "object"
                                                :additionalProperties true}
+                               :external_refs {:type "array"
+                                               :items {:type ["string" "object"]}}
                                :provenance {:type "object"
                                             :properties {:source {:type "string"}
                                                          :source_ref {:type "string"}}}}
@@ -1168,7 +1205,7 @@
                                                          :source_ref {:type "string"}}}}
                   :required ["error_id" "project_id" "summary"]}}
    {:name "link_entities"
-    :description "Use when a causal or supporting relationship should be explicit (for example decision justifies patch, error motivated decision)."
+    :description "Use when a causal or supporting relationship should be explicit (for example decision justifies patch, error motivated decision, or project dependency links like depends_on/calls_api)."
     :inputSchema {:type "object"
                   :properties {:link_id {:type "string"}
                                :name {:type "string"}
@@ -1187,16 +1224,18 @@
                                                          :source_ref {:type "string"}}}}
                   :required ["link_id" "project_id" "from_id" "to_id" "link_type"]}}
    {:name "search_notes"
-    :description "Use for broad recall when you have a text query and want note hits within a project."
+    :description "Use for broad recall when you have a text query and want note hits within one or more projects."
     :inputSchema {:type "object"
                   :properties {:project_id {:type "string"}
+                               :project_ids {:type "array" :items {:type "string"}}
                                :query {:type "string"}
                                :limit {:type "integer"}}
-                  :required ["project_id" "query"]}}
+                  :required ["query"]}}
    {:name "find_related_context"
-    :description "Use before editing or debugging an entity to load nearby graph context (tasks, errors, decisions, patches, notes)."
+    :description "Use before editing or debugging an entity to load nearby graph context (tasks, errors, decisions, patches, notes). project_ids can broaden traversal across related projects."
     :inputSchema {:type "object"
                   :properties {:entity_id {:type "string"}
+                               :project_ids {:type "array" :items {:type "string"}}
                                :limit {:type "integer"}
                                :hops {:type "integer"}}
                   :required ["entity_id"]}}

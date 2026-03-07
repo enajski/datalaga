@@ -51,6 +51,23 @@
   [project-id entities]
   (filter #(= project-id (entity-project-id %)) entities))
 
+(defn- normalize-project-scope
+  [db-value project-id project-ids]
+  (let [explicit (->> (concat (util/ensure-vector project-ids)
+                              (when project-id [project-id]))
+                      (remove nil?)
+                      distinct
+                      vec)]
+    (if (seq explicit)
+      explicit
+      (vec (store/all-project-ids db-value)))))
+
+(defn- scoped-entities
+  [db-value project-ids]
+  (->> project-ids
+       (mapcat #(store/project-entities db-value %))
+       store/distinct-summaries))
+
 (defn- group-briefs
   [entities]
   (into {}
@@ -150,14 +167,17 @@
                    (mapv brief))}))
 
 (defn search-notes
-  [conn {:keys [project-id query limit]
+  [conn {:keys [project-id project-ids query limit]
          :or {limit 5}}]
-  (let [db-value (store/db conn)]
+  (let [db-value (store/db conn)
+        scope (normalize-project-scope db-value project-id project-ids)
+        scope-set (set scope)]
     {:project-id project-id
+     :project_ids scope
      :query query
      :matches (->> (store/search-body db-value query {:limit (* 3 limit)
                                                       :predicate #(and (= :note (:entity/type %))
-                                                                       (= project-id (entity-project-id %)))})
+                                                                       (contains? scope-set (entity-project-id %)))})
                    (take limit)
                    (mapv brief))}))
 
@@ -176,13 +196,17 @@
           entities))
 
 (defn find-related-context
-  [conn {:keys [entity-id limit hops]
+  [conn {:keys [entity-id project-ids limit hops]
          :or {limit 8
               hops 2}}]
   (let [db-value (store/db conn)
         start (store/pull-entity-by-id db-value entity-id)
         project-id (entity-project-id start)
-        entities (store/project-entities db-value project-id)
+        scope (->> (concat [project-id] (util/ensure-vector project-ids))
+                   (remove nil?)
+                   distinct
+                   vec)
+        entities (scoped-entities db-value scope)
         by-id (into {} (map (juxt :entity/id identity)) entities)
         graph (build-graph entities)
         initial-state {:queue (conj clojure.lang.PersistentQueue/EMPTY [entity-id 0])
@@ -199,6 +223,7 @@
                                         updated-visited (reduce #(assoc %1 %2 (inc depth)) visited neighbors)]
                                     (recur {:queue updated-queue :visited updated-visited}))))))]
     {:start (brief start)
+     :project_ids scope
      :related (->> visited
                    (remove (fn [[candidate-id _]] (= candidate-id entity-id)))
                    (map (fn [[candidate-id distance]]

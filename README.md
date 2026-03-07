@@ -125,8 +125,10 @@ Notable behavior:
 - `list_projects` is sorted by recent project activity (latest entity update/create), and each project brief includes `project/last-activity-at`.
 - `record_error` defaults to `entity/status = open` unless provided explicitly.
 - `link_entities` with `link_type = resolved_by` auto-marks the source error as `resolved` and attaches the resolver run as a reference.
+- `link_entities` can also model cross-project service topology explicitly (for example `link_type = depends_on` or `link_type = calls_api` between `project:*` entities).
 - `summarize_project_memory` and `memory://project/{project_id}/recent-failures` exclude errors already marked `resolved`/`closed`.
-- `remember_fact` auto-normalizes `attributes.files` / `attributes.file_paths` into `file:*` refs, upserts missing file entities, and returns `normalized_file_refs`.
+- `remember_fact` auto-normalizes `attributes.files` / `attributes.file_paths` into `file:*` refs, upserts missing file entities, and returns `normalized_file_refs`; `external_refs` (or `attributes.external_refs`) are normalized into `entity/external-refs`.
+- `search_notes` supports `project_ids` for cross-project recall, and `find_related_context` accepts `project_ids` to broaden graph traversal beyond the anchor entity's project.
 - `normalize_project_memory` supports project-scoped `dry_run|apply` housekeeping with operation filters:
   - `normalize_entity_types`
   - `backfill_error_resolution`

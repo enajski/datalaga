@@ -1,6 +1,6 @@
 # Datalevin MCP Evaluation
 
-Generated on 2026-03-06T20:19:10.705Z.
+Generated on 2026-03-07T16:20:55.802Z.
 
 Recommendation: **fit with caveats**
 
@@ -10,7 +10,7 @@ Recommendation: **fit with caveats**
 | --- | ---: | ---: |
 | Exact entity lookup | 0.00 | 0.00 |
 | Graph/EAV traversal | 0.75 | 0.59 |
-| Full-text search | 0.15 | 0.18 |
+| Full-text search | 0.11 | 0.16 |
 | Hybrid text + graph | 0.53 | 0.40 |
 
 ## Scenario Results
@@ -38,7 +38,7 @@ Expected entities: `decision:check-session-generation-on-refresh`, `error:refres
 | --- | ---: | ---: | --- |
 | Exact entity lookup | 0.00 | 0.00 | `` |
 | Graph/EAV traversal | 0.00 | 0.00 | `` |
-| Full-text search | 0.60 | 0.38 | `error:refresh-rotation-flake`, `error:stale-session-after-reset`, `patch:stabilize-refresh-rotation-test` |
+| Full-text search | 0.40 | 0.29 | `error:refresh-rotation-flake`, `error:stale-session-after-reset` |
 | Hybrid text + graph | 1.00 | 0.63 | `decision:check-session-generation-on-refresh`, `error:refresh-rotation-flake`, `error:stale-session-after-reset`, `patch:refresh-session-generation-check`, `patch:stabilize-refresh-rotation-test` |
 
 ### prior-decisions-for-task

@@ -300,13 +300,14 @@
 (defn entity-brief
   [entity]
   (util/compact-map
-   {:entity/id (:entity/id entity)
-    :entity/type (:entity/type entity)
-    :entity/name (:entity/name entity)
-    :entity/summary (:entity/summary entity)
-    :entity/path (:entity/path entity)
-    :entity/status (:entity/status entity)
-    :entity/created-at (:entity/created-at entity)}))
+  {:entity/id (:entity/id entity)
+   :entity/type (:entity/type entity)
+   :entity/name (:entity/name entity)
+   :entity/summary (:entity/summary entity)
+   :entity/external-refs (:entity/external-refs entity)
+   :entity/path (:entity/path entity)
+   :entity/status (:entity/status entity)
+   :entity/created-at (:entity/created-at entity)}))
 
 (defn all-project-ids
   [db-value]
