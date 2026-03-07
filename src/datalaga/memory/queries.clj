@@ -260,14 +260,17 @@
 
 (defn- build-graph
   [entity-ids edge-pairs]
-  (reduce (fn [graph [source-id target-id]]
-            (if (= source-id target-id)
-              graph
-              (-> graph
-                  (update source-id (fnil conj #{}) target-id)
-                  (update target-id (fnil conj #{}) source-id))))
-          (into {} (map (fn [entity-id] [entity-id #{}]) entity-ids))
-          edge-pairs))
+  (let [id-set (set entity-ids)]
+    (reduce (fn [graph [source-id target-id]]
+              (if (or (= source-id target-id)
+                      (not (contains? id-set source-id))
+                      (not (contains? id-set target-id)))
+                graph
+                (-> graph
+                    (update source-id (fnil conj #{}) target-id)
+                    (update target-id (fnil conj #{}) source-id))))
+            (into {} (map (fn [entity-id] [entity-id #{}]) entity-ids))
+            edge-pairs)))
 
 (defn find-related-context
   [conn {:keys [entity-id project-ids limit hops]
