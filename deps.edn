@@ -9,4 +9,6 @@
            :seed {:main-opts ["-m" "datalaga.ingest"]}
            :inspect {:main-opts ["-m" "datalaga.inspect"]}
            :eval {:main-opts ["-m" "datalaga.eval"]}
-           :maintenance {:main-opts ["-m" "datalaga.maintenance"]}}}
+           :maintenance {:main-opts ["-m" "datalaga.maintenance"]}
+           :test {:extra-paths ["test"]
+                  :main-opts ["-m" "datalaga.test-runner"]}}}

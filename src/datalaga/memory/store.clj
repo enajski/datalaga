@@ -103,17 +103,17 @@
   [:entity/id entity-id])
 
 (defn- resolve-ref-id
-  [db-value new-ids attr ref-id]
+  [db-value new-tempids attr ref-id]
   (cond
     (nil? ref-id) nil
     (vector? ref-id) ref-id
-    (map? ref-id) (resolve-ref-id db-value new-ids attr (:entity/id ref-id))
+    (map? ref-id) (resolve-ref-id db-value new-tempids attr (:entity/id ref-id))
     (string? ref-id)
-    (if (or (contains? new-ids ref-id)
-            (lookup-eid db-value ref-id))
-      (entity-id->lookup-ref ref-id)
-      (throw (ex-info "Referenced entity does not exist"
-                      {:attr attr :ref-id ref-id})))
+    (cond
+      (contains? new-tempids ref-id) (get new-tempids ref-id)
+      (lookup-eid db-value ref-id) (entity-id->lookup-ref ref-id)
+      :else (throw (ex-info "Referenced entity does not exist"
+                            {:attr attr :ref-id ref-id})))
     :else (throw (ex-info "Unsupported ref value" {:attr attr :ref-id ref-id}))))
 
 (defn- ref-id-candidates
@@ -134,51 +134,59 @@
     :else (throw (ex-info "Unsupported ref value" {:value value}))))
 
 (defn- validate-ref-attrs!
-  [db-value new-ids entity]
+  [db-value new-tempids entity]
   (doseq [[attr value] entity
           :when (and (schema/ref-attrs attr) (some? value))
           ref-id (ref-id-candidates value)]
-    (when-not (or (contains? new-ids ref-id)
+    (when-not (or (contains? new-tempids ref-id)
                   (lookup-eid db-value ref-id))
       (throw (ex-info "Referenced entity does not exist"
                       {:attr attr
                        :ref-id ref-id})))))
 
 (defn- resolve-ref-value
-  [db-value new-ids attr value]
+  [db-value new-tempids attr value]
   (if (schema/many-attrs attr)
     (->> value
          util/ensure-vector
-         (mapv #(resolve-ref-id db-value new-ids attr %)))
-    (resolve-ref-id db-value new-ids attr value)))
+         (mapv #(resolve-ref-id db-value new-tempids attr %)))
+    (resolve-ref-id db-value new-tempids attr value)))
 
 (defn- build-entity-tx
-  [db-value new-ids entity]
-  (let [tx-map (reduce-kv (fn [acc attr value]
+  [db-value new-tempids entity]
+  (let [entity-id (:entity/id entity)
+        db-id (or (get new-tempids entity-id)
+                  (entity-id->lookup-ref entity-id))
+        tx-map (reduce-kv (fn [acc attr value]
                             (cond
                               (nil? value) acc
                               (and (= attr :entity/id) (str/blank? value)) acc
-                              (schema/ref-attrs attr) (assoc acc attr (resolve-ref-value db-value new-ids attr value))
+                              (schema/ref-attrs attr) (assoc acc attr (resolve-ref-value db-value new-tempids attr value))
                               :else (assoc acc attr value)))
-                          {}
+                          {:db/id db-id}
                           entity)]
-    (when (> (count tx-map) 1)
+    (when (> (count (dissoc tx-map :db/id)) 1)
       tx-map)))
 
-(defn- known-new-ids
-  [entities]
-  (->> entities
-       (filter :entity/type)
-       (map :entity/id)
-       set))
+(defn- new-id->tempid
+  [db-value entities]
+  (let [new-ids (->> entities
+                     (map :entity/id)
+                     (filter #(nil? (lookup-eid db-value %)))
+                     distinct
+                     vec)]
+    (into {}
+          (map-indexed (fn [idx entity-id]
+                         [entity-id (- (inc idx))])
+                       new-ids))))
 
 (defn- validate-entity!
-  [db-value new-ids entity]
+  [db-value new-tempids entity]
   (when-not (:entity/id entity)
     (throw (ex-info "Entity is missing :entity/id" {:entity entity})))
   (when (and (nil? (:entity/type entity))
              (nil? (lookup-eid db-value (:entity/id entity)))
-             (not (contains? new-ids (:entity/id entity))))
+             (not (contains? new-tempids (:entity/id entity))))
     (throw (ex-info "New entity requires :entity/type"
                     {:entity-id (:entity/id entity)
                      :entity entity}))))
@@ -187,11 +195,11 @@
   [conn entities]
   (let [merged-entities (coalesce-entities entities)
         starting-db (db conn)
-        new-ids (known-new-ids merged-entities)]
+        new-tempids (new-id->tempid starting-db merged-entities)]
     (doseq [entity merged-entities]
-      (validate-entity! starting-db new-ids entity)
-      (validate-ref-attrs! starting-db new-ids entity))
-    (when-let [tx-data (seq (keep #(build-entity-tx starting-db new-ids %) merged-entities))]
+      (validate-entity! starting-db new-tempids entity)
+      (validate-ref-attrs! starting-db new-tempids entity))
+    (when-let [tx-data (seq (keep #(build-entity-tx starting-db new-tempids %) merged-entities))]
       (d/transact! conn tx-data))
     {:entity-ids (mapv :entity/id merged-entities)
      :entity-count (count merged-entities)}))

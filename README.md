@@ -215,17 +215,18 @@ Run `./bin/run-eval` to regenerate:
 - MCP smoke test evidence (tools/resources reachable via stdio protocol)
 - recommendation and rationale
 
-## AGENTS.md Snippet (Enforce datalevin-memory Usage)
+## AGENTS.md Snippet (Enforce datalaga Usage)
 
 Use this snippet in a repo-level `AGENTS.md` to enforce consistent memory behavior:
 
 ```md
-## Required MCP Memory Policy (`datalevin-memory`)
+## Required MCP Memory Policy (`datalaga`)
 
-For all non-trivial coding tasks in this repository, you MUST use the `datalevin-memory` MCP server.
+For all non-trivial coding tasks in this repository, you MUST use the `datalaga` MCP server.
 
 ### 1) Bootstrap
 - At the start of work, call `list_projects`.
+- Do not assume demo seed data exists; the server may run without `--seed-on-start`.
 - If the current repo project is missing, call `ensure_project` with `project_id` and a short summary.
 - If you will write task-scoped records (`task_id` on runs/events/errors/facts), call `ensure_task` first.
 - `ensure_task` also updates an existing task’s mutable fields (`status`, `summary`, `priority`, `description`) when reused.
@@ -236,6 +237,8 @@ For all non-trivial coding tasks in this repository, you MUST use the `datalevin
   - `get_symbol_memory` (symbol-focused work),
   - `find_related_context` (file/entity neighborhood),
   - `get_task_timeline` (task-focused work), as applicable.
+- Use `memory_pull` for targeted entity inspection when high-level tools are insufficient.
+- Use `memory_query` for advanced recall/debugging (EDN Datalog), and prefer high-level read tools by default.
 
 ### 3) Write During/After Work
 - Record command executions with `record_tool_run` (build/test/lint/tool output).
