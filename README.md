@@ -61,6 +61,12 @@ Start MCP server:
 ./bin/start-mcp --db-path .data/memory --seed-file examples/seed-data.edn
 ```
 
+Seed on startup only when requested:
+
+```bash
+./bin/start-mcp --db-path .data/memory --seed-file examples/seed-data.edn --seed-on-start
+```
+
 Run local demo/evaluation:
 
 ```bash
@@ -74,6 +80,7 @@ Inspect memory directly:
 ./bin/inspect-memory task task:AUTH-142
 ./bin/inspect-memory symbol symbol:src/auth/session.clj#refresh-session
 ./bin/inspect-memory prior-decisions task:AUTH-160
+./bin/inspect-memory --seed-before-run summary project:phoenix-auth
 ```
 
 Run housekeeping normalization:
@@ -81,6 +88,7 @@ Run housekeeping normalization:
 ```bash
 ./bin/normalize-memory --project-id project:yoyo-evolve --mode dry_run
 ./bin/normalize-memory --project-id project:yoyo-evolve --mode apply --migration-id migration:v1
+./bin/normalize-memory --seed-before-run --project-id project:yoyo-evolve --mode dry_run
 ```
 
 ## MCP Surface
@@ -102,6 +110,8 @@ Implemented tools:
 - `get_symbol_memory`
 - `get_task_timeline`
 - `summarize_project_memory`
+- `memory_query` (raw Datalevin Datalog query via EDN payload)
+- `memory_pull` (entity pull with optional EDN pull pattern)
 - `normalize_project_memory` (admin maintenance)
 
 Notable behavior:

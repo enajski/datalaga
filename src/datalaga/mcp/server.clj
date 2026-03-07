@@ -1,9 +1,11 @@
 (ns datalaga.mcp.server
   (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
+            [datalevin.core :as d]
             [datalaga.ingest :as ingest]
             [datalaga.memory.maintenance :as maintenance]
             [datalaga.memory.queries :as queries]
@@ -18,6 +20,8 @@
     :default store/default-db-path]
    ["-s" "--seed-file FILE" "Path to the EDN seed dataset."
     :default ingest/default-seed-file]
+   [nil "--seed-on-start" "Seed the database on startup before serving requests."
+    :default false]
    ["-h" "--help"]])
 
 (defn- eprintln
@@ -121,6 +125,8 @@
    "get_symbol_memory" #{:symbol_id :limit}
    "get_task_timeline" #{:task_id}
    "summarize_project_memory" #{:project_id}
+   "memory_query" #{:query_edn :inputs :inputs_edn}
+   "memory_pull" #{:entity_id :pattern_edn}
    "normalize_project_memory" #{:project_id :mode :operations :max_changes :migration_id :provenance}})
 
 (def tool-required-args
@@ -139,6 +145,8 @@
    "get_symbol_memory" #{:symbol_id}
    "get_task_timeline" #{:task_id}
    "summarize_project_memory" #{:project_id}
+   "memory_query" #{:query_edn}
+   "memory_pull" #{:entity_id}
    "normalize_project_memory" #{:project_id :mode}})
 
 (defn- missing-required-keys
@@ -291,19 +299,22 @@
 (defn- list-projects!
   [conn]
   (let [db-value (store/db conn)
-        entity-ts-ms (fn [entity]
-                       (or (some-> (:entity/updated-at entity) .getTime)
-                           (some-> (:entity/created-at entity) .getTime)
-                           Long/MIN_VALUE))
-        project-last-activity (fn [project-id]
-                                (let [project-entities (store/project-entities db-value project-id)
-                                      best-ms (reduce max Long/MIN_VALUE (map entity-ts-ms project-entities))]
-                                  (if (= best-ms Long/MIN_VALUE)
-                                    nil
-                                    (java.util.Date. best-ms))))
         project-brief (fn [project-id]
                         (let [project (store/pull-entity-by-id db-value project-id)
-                              last-activity (project-last-activity project-id)]
+                              project-eid (store/project-eid db-value project-id)
+                              related-updated-at (when project-eid
+                                                   (store/project-max-instant db-value project-eid :entity/updated-at))
+                              related-created-at (when project-eid
+                                                   (store/project-max-instant db-value project-eid :entity/created-at))
+                              best-ms (->> [(:entity/updated-at project)
+                                            (:entity/created-at project)
+                                            related-updated-at
+                                            related-created-at]
+                                           (remove nil?)
+                                           (map #(.getTime ^java.util.Date %))
+                                           (reduce max Long/MIN_VALUE))
+                              last-activity (when (not= best-ms Long/MIN_VALUE)
+                                              (java.util.Date. best-ms))]
                           (cond-> (store/entity-brief project)
                             last-activity (assoc :project/last-activity-at last-activity))))]
     {:projects (->> (store/all-project-ids db-value)
@@ -398,6 +409,20 @@
   (let [s (some-> value str str/trim)]
     (when-not (str/blank? s)
       s)))
+
+(defn- parse-edn-value
+  [field-name value]
+  (cond
+    (nil? value) nil
+    (string? value)
+    (try
+      (edn/read-string value)
+      (catch Exception ex
+        (throw (ex-info "Invalid EDN payload"
+                        {:field field-name
+                         :value value}
+                        ex))))
+    :else value))
 
 (defn- normalize-external-ref
   [value]
@@ -515,17 +540,31 @@
   [db-value project-id query]
   (let [normalized-query (normalize-search-query query)
         expected-scoped-id (some-> normalized-query (project-scoped-file-id project-id))
-        expected-legacy-id (some-> normalized-query (str "file:"))]
-    (when (and normalized-query (not (str/blank? normalized-query)))
-      (let [project-files (->> (store/project-entities db-value project-id)
-                               (filter #(= :file (:entity/type %))))]
-        (->> project-files
-             (filter (fn [entity]
-                       (or (= expected-scoped-id (:entity/id entity))
-                           (= expected-legacy-id (:entity/id entity))
-                           (= normalized-query (:entity/path entity))
-                           (= normalized-query (:entity/id entity)))))
-             store/distinct-summaries)))))
+        expected-legacy-id (some-> normalized-query (str "file:"))
+        project-eid (store/project-eid db-value project-id)]
+    (when (and project-eid normalized-query (not (str/blank? normalized-query)))
+      (let [candidate-values (->> [expected-scoped-id expected-legacy-id normalized-query]
+                                  (remove nil?)
+                                  distinct
+                                  vec)
+            by-id (mapcat (fn [value]
+                            (store/project-entity-ids-by-type-and-attr-value db-value
+                                                                             project-eid
+                                                                             :file
+                                                                             :entity/id
+                                                                             value))
+                          candidate-values)
+            by-path (mapcat (fn [value]
+                              (store/project-entity-ids-by-type-and-attr-value db-value
+                                                                               project-eid
+                                                                               :file
+                                                                               :entity/path
+                                                                               value))
+                            candidate-values)
+            matched-ids (->> (concat by-id by-path)
+                             distinct
+                             vec)]
+        (store/pull-entities-by-id db-value matched-ids)))))
 
 (defn- exact-code-query-score
   [query entity]
@@ -961,6 +1000,38 @@
      :resolved_entity (when maybe-resolution
                         (store/pull-entity-by-id (store/db conn) (:from_id arguments)))}))
 
+(defn- memory-query!
+  [conn arguments]
+  (let [query-form (parse-edn-value :query_edn (:query_edn arguments))
+        parsed-inputs (parse-edn-value :inputs_edn (:inputs_edn arguments))
+        inputs (or parsed-inputs (:inputs arguments) [])
+        inputs (if (sequential? inputs) (vec inputs) [inputs])
+        db-value (store/db conn)
+        results (apply d/q query-form db-value inputs)]
+    {:query query-form
+     :inputs inputs
+     :results results}))
+
+(defn- entity-ref
+  [entity-id]
+  (cond
+    (vector? entity-id) entity-id
+    (number? entity-id) entity-id
+    (string? entity-id) [:entity/id entity-id]
+    :else (throw (ex-info "Unsupported entity id"
+                          {:entity_id entity-id}))))
+
+(defn- memory-pull!
+  [conn arguments]
+  (let [db-value (store/db conn)
+        entity-id (:entity_id arguments)
+        pattern (or (parse-edn-value :pattern_edn (:pattern_edn arguments))
+                    memory-schema/readable-pull)
+        entity (d/pull db-value pattern (entity-ref entity-id))]
+    {:entity_id entity-id
+     :pattern pattern
+     :entity entity}))
+
 (defn- call-tool!
   [conn tool-name arguments]
   (validate-tool-arguments! tool-name arguments)
@@ -987,6 +1058,8 @@
                                                          :limit (or (:limit arguments) 12)})
     "get_task_timeline" (queries/get-task-timeline conn {:task-id (:task_id arguments)})
     "summarize_project_memory" (queries/summarize-project-memory conn {:project-id (:project_id arguments)})
+    "memory_query" (memory-query! conn arguments)
+    "memory_pull" (memory-pull! conn arguments)
     "normalize_project_memory" (maintenance/normalize-project-memory! conn arguments)
     (throw (ex-info "Unknown tool" {:tool-name tool-name}))))
 
@@ -1255,6 +1328,19 @@
     :inputSchema {:type "object"
                   :properties {:project_id {:type "string"}}
                   :required ["project_id"]}}
+   {:name "memory_query"
+    :description "Run a raw Datalevin Datalog query. query_edn must be an EDN query form, with optional EDN/vector inputs."
+    :inputSchema {:type "object"
+                  :properties {:query_edn {:type "string"}
+                               :inputs {:type "array"}
+                               :inputs_edn {:type "string"}}
+                  :required ["query_edn"]}}
+   {:name "memory_pull"
+    :description "Pull an entity with an optional EDN pull pattern. Defaults to the server readable pull pattern."
+    :inputSchema {:type "object"
+                  :properties {:entity_id {:type ["string" "integer"]}
+                               :pattern_edn {:type "string"}}
+                  :required ["entity_id"]}}
    {:name "normalize_project_memory"
     :description "Admin maintenance tool. Use in dry_run first, then apply to normalize legacy types, backfill resolved failures, and link run supersession metadata."
     :inputSchema {:type "object"
@@ -1406,8 +1492,9 @@
        nil])))
 
 (defn- run-server!
-  [{:keys [db-path seed-file]}]
-  (ingest/seed! {:db-path db-path :seed-file seed-file})
+  [{:keys [db-path seed-file seed-on-start]}]
+  (when seed-on-start
+    (ingest/seed! {:db-path db-path :seed-file seed-file}))
   (let [conn (store/open-conn db-path)
         initialized? (atom false)
         reader (io/reader *in*)

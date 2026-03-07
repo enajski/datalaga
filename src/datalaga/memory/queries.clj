@@ -1,5 +1,6 @@
 (ns datalaga.memory.queries
-  (:require [clojure.set :as set]
+  (:require [clojure.string :as str]
+            [datalevin.core :as d]
             [datalaga.memory.schema :as schema]
             [datalaga.memory.store :as store]
             [datalaga.util :as util]))
@@ -25,18 +26,6 @@
                    (:entity/id entity)]))
        vec))
 
-(defn- direct-ref-ids
-  [entity]
-  (->> entity
-       vals
-       (mapcat (fn collect [value]
-                 (cond
-                   (and (map? value) (:entity/id value)) [(:entity/id value)]
-                   (map? value) (mapcat collect (vals value))
-                   (sequential? value) (mapcat collect value)
-                   :else [])))
-       set))
-
 (defn- entity-project-id
   [entity]
   (or (get-in entity [:entity/project :entity/id])
@@ -46,10 +35,6 @@
 (defn- brief
   [entity]
   (store/entity-brief entity))
-
-(defn- filter-project
-  [project-id entities]
-  (filter #(= project-id (entity-project-id %)) entities))
 
 (defn- normalize-project-scope
   [db-value project-id project-ids]
@@ -62,11 +47,33 @@
       explicit
       (vec (store/all-project-ids db-value)))))
 
-(defn- scoped-entities
+(defn- scoped-project-eids
   [db-value project-ids]
   (->> project-ids
-       (mapcat #(store/project-entities db-value %))
-       store/distinct-summaries))
+       (mapv (fn [project-id]
+               [project-id
+                (store/require-project-eid db-value project-id)]))
+       (into {})))
+
+(defn- scoped-entity-ids
+  [db-value project-id->eid]
+  (->> (concat
+        (keys project-id->eid)
+        (mapcat (fn [[_ project-eid]]
+                  (store/project-entity-ids-for-eid db-value project-eid))
+                project-id->eid))
+       distinct
+       vec))
+
+(defn- scoped-edge-pairs
+  [db-value project-id->eid]
+  (->> schema/ref-attrs
+       (mapcat (fn [attr]
+                 (mapcat (fn [[_ project-eid]]
+                           (store/project-ref-edge-pairs db-value project-eid attr))
+                         project-id->eid)))
+       distinct
+       vec))
 
 (defn- group-briefs
   [entities]
@@ -88,27 +95,63 @@
   (and (= :task (:entity/type entity))
        (not (contains? closed-task-statuses (:entity/status entity)))))
 
+(defn- require-eid
+  [db-value entity-id entity-label]
+  (or (store/lookup-eid db-value entity-id)
+      (throw (ex-info (str (str/capitalize entity-label) " does not exist")
+                      {(keyword (str entity-label "-id")) entity-id}))))
+
+(defn- scoped-type-entity-ids
+  [db-value project-ids entity-type]
+  (let [project-id->eid (scoped-project-eids db-value project-ids)]
+    (->> project-id->eid
+         vals
+         (mapcat #(store/project-entity-ids-by-type db-value % entity-type))
+         distinct
+         vec)))
+
+(defn- exact-match-entity-ids
+  [db-value project-id term]
+  (let [target-lower (some-> term str/lower-case)
+        project-eid (when project-id
+                      (store/project-eid db-value project-id))
+        attrs [:entity/id :entity/name :entity/path :symbol/qualified-name]]
+    (if (str/blank? target-lower)
+      []
+      (->> attrs
+           (mapcat (fn [attr]
+                     (if project-eid
+                       (d/q '[:find [?entity-id ...]
+                              :in $ ?project ?attr ?target-lower
+                              :where
+                              [?e :entity/project ?project]
+                              [?e ?attr ?value]
+                              [(clojure.string/lower-case ?value) ?value-lower]
+                              [(= ?value-lower ?target-lower)]
+                              [?e :entity/id ?entity-id]]
+                            db-value
+                            project-eid
+                            attr
+                            target-lower)
+                       (d/q '[:find [?entity-id ...]
+                              :in $ ?attr ?target-lower
+                              :where
+                              [?e ?attr ?value]
+                              [(clojure.string/lower-case ?value) ?value-lower]
+                              [(= ?value-lower ?target-lower)]
+                              [?e :entity/id ?entity-id]]
+                            db-value
+                            attr
+                            target-lower))))
+           distinct
+           vec))))
+
 (defn exact-lookup
   [conn {:keys [project-id term limit]
          :or {limit 10}}]
   (let [db-value (store/db conn)
-        project-filter (fn [entity]
-                         (or (nil? project-id)
-                             (= project-id (entity-project-id entity))))
-        target (or term "")
-        target-lower (.toLowerCase target)]
-    (->> (if project-id
-           (store/project-entities db-value project-id)
-           (mapcat #(store/project-entities db-value %)
-                   (store/all-project-ids db-value)))
-         (filter project-filter)
-         (filter (fn [entity]
-                   (some #(= target-lower (.toLowerCase ^String %))
-                         (remove nil?
-                                 [(:entity/id entity)
-                                  (:entity/name entity)
-                                  (:entity/path entity)
-                                  (get entity :symbol/qualified-name)]))))
+        matched-ids (exact-match-entity-ids db-value project-id term)]
+    (->> (store/pull-entities-by-id db-value matched-ids)
          sort-desc
          (take limit)
          vec)))
@@ -116,15 +159,29 @@
 (defn project-summary
   [conn project-id]
   (let [db-value (store/db conn)
-        entities (store/project-entities db-value project-id)
-        counts (->> entities
-                    (group-by :entity/type)
-                    (into {}
-                          (map (fn [[entity-type matches]]
-                                 [entity-type (count matches)]))))
-        recent-patches (->> entities (filter #(= :patch (:entity/type %))) sort-desc (take 5) (mapv brief))
-        recent-failures (->> entities (filter unresolved-error?) sort-desc (take 5) (mapv brief))
-        active-tasks (->> entities
+        project-eid (require-eid db-value project-id "project")
+        counts-by-type (d/q '[:find ?entity-type (count ?e)
+                              :in $ ?project
+                              :where
+                              [?e :entity/project ?project]
+                              [?e :entity/type ?entity-type]]
+                            db-value
+                            project-eid)
+        counts (assoc (into {} (map (fn [[entity-type c]] [entity-type c]) counts-by-type))
+                      :project 1)
+        recent-patches (->> (store/project-entity-ids-by-type db-value project-eid :patch)
+                            (store/pull-entities-by-id db-value)
+                            sort-desc
+                            (take 5)
+                            (mapv brief))
+        recent-failures (->> (store/project-entity-ids-by-type db-value project-eid :error)
+                             (store/pull-entities-by-id db-value)
+                             (filter unresolved-error?)
+                             sort-desc
+                             (take 5)
+                             (mapv brief))
+        active-tasks (->> (store/project-entity-ids-by-type db-value project-eid :task)
+                          (store/pull-entities-by-id db-value)
                           (filter active-task?)
                           sort-desc
                           (mapv brief))]
@@ -140,16 +197,20 @@
 
 (defn recent-failures
   [conn project-id]
-  (let [db-value (store/db conn)]
-    (->> (store/project-entities db-value project-id)
+  (let [db-value (store/db conn)
+        project-eid (require-eid db-value project-id "project")]
+    (->> (store/project-entity-ids-by-type db-value project-eid :error)
+         (store/pull-entities-by-id db-value)
          (filter unresolved-error?)
          sort-desc
          (mapv brief))))
 
 (defn active-tasks
   [conn project-id]
-  (let [db-value (store/db conn)]
-    (->> (store/project-entities db-value project-id)
+  (let [db-value (store/db conn)
+        project-eid (require-eid db-value project-id "project")]
+    (->> (store/project-entity-ids-by-type db-value project-eid :task)
+         (store/pull-entities-by-id db-value)
          (filter active-task?)
          sort-desc
          (mapv brief))))
@@ -158,11 +219,25 @@
   [conn session-id]
   (let [db-value (store/db conn)
         session (store/pull-entity-by-id db-value session-id)
-        project-id (entity-project-id session)]
+        _ (when-not session
+            (throw (ex-info "Session does not exist" {:session-id session-id})))
+        project-id (entity-project-id session)
+        project-eid (require-eid db-value project-id "project")
+        session-eid (require-eid db-value session-id "session")
+        entity-ids (d/q '[:find [?entity-id ...]
+                          :in $ ?project ?session ?timeline-types
+                          :where
+                          [?e :entity/project ?project]
+                          [?e :entity/session ?session]
+                          [?e :entity/type ?entity-type]
+                          [(contains? ?timeline-types ?entity-type)]
+                          [?e :entity/id ?entity-id]]
+                        db-value
+                        project-eid
+                        session-eid
+                        schema/timeline-types)]
     {:session (brief session)
-     :entries (->> (store/project-entities db-value project-id)
-                   (filter #(= session-id (get-in % [:entity/session :entity/id])))
-                   (filter #(contains? schema/timeline-types (:entity/type %)))
+     :entries (->> (store/pull-entities-by-id db-value entity-ids)
                    sort-asc
                    (mapv brief))}))
 
@@ -171,29 +246,28 @@
          :or {limit 5}}]
   (let [db-value (store/db conn)
         scope (normalize-project-scope db-value project-id project-ids)
-        scope-set (set scope)]
+        scoped-note-id-set (->> (scoped-type-entity-ids db-value scope :note)
+                                set)]
     {:project-id project-id
      :project_ids scope
      :query query
      :matches (->> (store/search-body db-value query {:limit (* 3 limit)
                                                       :predicate #(and (= :note (:entity/type %))
-                                                                       (contains? scope-set (entity-project-id %)))})
+                                                                       (contains? scoped-note-id-set
+                                                                                  (:entity/id %)))})
                    (take limit)
                    (mapv brief))}))
 
 (defn- build-graph
-  [entities]
-  (reduce (fn [acc entity]
-            (let [entity-id (:entity/id entity)
-                  neighbors (disj (direct-ref-ids entity) entity-id)]
-              (reduce (fn [graph neighbor-id]
-                        (-> graph
-                            (update entity-id (fnil conj #{}) neighbor-id)
-                            (update neighbor-id (fnil conj #{}) entity-id)))
-                      (update acc entity-id (fnil into #{}) neighbors)
-                      neighbors)))
-          {}
-          entities))
+  [entity-ids edge-pairs]
+  (reduce (fn [graph [source-id target-id]]
+            (if (= source-id target-id)
+              graph
+              (-> graph
+                  (update source-id (fnil conj #{}) target-id)
+                  (update target-id (fnil conj #{}) source-id))))
+          (into {} (map (fn [entity-id] [entity-id #{}]) entity-ids))
+          edge-pairs))
 
 (defn find-related-context
   [conn {:keys [entity-id project-ids limit hops]
@@ -201,14 +275,17 @@
               hops 2}}]
   (let [db-value (store/db conn)
         start (store/pull-entity-by-id db-value entity-id)
+        _ (when-not start
+            (throw (ex-info "Entity does not exist" {:entity-id entity-id})))
         project-id (entity-project-id start)
         scope (->> (concat [project-id] (util/ensure-vector project-ids))
                    (remove nil?)
                    distinct
                    vec)
-        entities (scoped-entities db-value scope)
-        by-id (into {} (map (juxt :entity/id identity)) entities)
-        graph (build-graph entities)
+        scoped-projects (scoped-project-eids db-value scope)
+        entity-ids (scoped-entity-ids db-value scoped-projects)
+        edge-pairs (scoped-edge-pairs db-value scoped-projects)
+        graph (build-graph entity-ids edge-pairs)
         initial-state {:queue (conj clojure.lang.PersistentQueue/EMPTY [entity-id 0])
                        :visited {entity-id 0}}
         {:keys [visited]} (loop [{:keys [queue visited] :as state} initial-state]
@@ -218,17 +295,24 @@
                                 (if (>= depth hops)
                                   (recur (assoc state :queue next-queue))
                                   (let [neighbors (remove #(contains? visited %)
-                                                          (get graph current))
+                                                          (get graph current #{}))
                                         updated-queue (reduce #(conj %1 [%2 (inc depth)]) next-queue neighbors)
                                         updated-visited (reduce #(assoc %1 %2 (inc depth)) visited neighbors)]
-                                    (recur {:queue updated-queue :visited updated-visited}))))))]
+                                    (recur {:queue updated-queue :visited updated-visited}))))))
+        related-entities (->> visited
+                              keys
+                              (remove #(= % entity-id))
+                              (store/pull-entities-by-id db-value))
+        by-id (into {} (map (juxt :entity/id identity) (conj related-entities start)))]
     {:start (brief start)
      :project_ids scope
      :related (->> visited
                    (remove (fn [[candidate-id _]] (= candidate-id entity-id)))
                    (map (fn [[candidate-id distance]]
-                          (assoc (brief (get by-id candidate-id))
-                                 :distance distance)))
+                          (when-let [entity (get by-id candidate-id)]
+                            (assoc (brief entity)
+                                   :distance distance))))
+                   (remove nil?)
                    (sort-by (fn [entity]
                               [(:distance entity)
                                (- (or (created-at-ms (get by-id (:entity/id entity))) 0))]))
@@ -240,11 +324,15 @@
          :or {limit 12}}]
   (let [db-value (store/db conn)
         symbol (store/pull-entity-by-id db-value symbol-id)
-        related (->> (:related (find-related-context conn {:entity-id symbol-id
-                                                           :limit (* 2 limit)
-                                                           :hops 2}))
-                     (map #(store/pull-entity-by-id db-value (:entity/id %)))
-                     (remove nil?)
+        _ (when-not symbol
+            (throw (ex-info "Symbol does not exist" {:symbol-id symbol-id})))
+        related-ids (->> (:related (find-related-context conn {:entity-id symbol-id
+                                                               :limit (* 2 limit)
+                                                               :hops 2}))
+                         (map :entity/id)
+                         distinct
+                         vec)
+        related (->> (store/pull-entities-by-id db-value related-ids)
                      sort-desc)
         grouped (group-briefs (filter #(contains? #{:error :patch :decision :note :task :observation :link :event}
                                                   (:entity/type %))
@@ -257,13 +345,56 @@
   [conn {:keys [task-id]}]
   (let [db-value (store/db conn)
         task (store/pull-entity-by-id db-value task-id)
+        _ (when-not task
+            (throw (ex-info "Task does not exist" {:task-id task-id})))
         project-id (entity-project-id task)
-        matches (->> (store/project-entities db-value project-id)
-                     (filter (fn [entity]
-                               (and (contains? schema/timeline-types (:entity/type entity))
-                                    (or (= task-id (:entity/id entity))
-                                        (= task-id (get-in entity [:entity/task :entity/id]))
-                                        (contains? (direct-ref-ids entity) task-id)))))
+        project-eid (store/lookup-eid db-value project-id)
+        task-eid (store/lookup-eid db-value task-id)
+        timeline-types schema/timeline-types
+        self-ids (d/q '[:find [?entity-id ...]
+                        :in $ ?project ?task-id ?timeline-types
+                        :where
+                        [?e :entity/project ?project]
+                        [?e :entity/type ?etype]
+                        [(contains? ?timeline-types ?etype)]
+                        [?e :entity/id ?entity-id]
+                        [(= ?entity-id ?task-id)]]
+                      db-value
+                      project-eid
+                      task-id
+                      timeline-types)
+        scoped-task-ids (d/q '[:find [?entity-id ...]
+                               :in $ ?project ?task-eid ?timeline-types
+                               :where
+                               [?e :entity/project ?project]
+                               [?e :entity/type ?etype]
+                               [(contains? ?timeline-types ?etype)]
+                               [?e :entity/task ?task-eid]
+                               [?e :entity/id ?entity-id]]
+                             db-value
+                             project-eid
+                             task-eid
+                             timeline-types)
+        ref-attrs [:entity/refs :note/refers-to :event/subjects :link/from :link/to :link/evidence]
+        ref-ids (->> ref-attrs
+                     (mapcat (fn [attr]
+                               (d/q '[:find [?entity-id ...]
+                                      :in $ ?project ?task-eid ?attr ?timeline-types
+                                      :where
+                                      [?e :entity/project ?project]
+                                      [?e :entity/type ?etype]
+                                      [(contains? ?timeline-types ?etype)]
+                                      [?e ?attr ?task-eid]
+                                      [?e :entity/id ?entity-id]]
+                                    db-value
+                                    project-eid
+                                    task-eid
+                                    attr
+                                    timeline-types)))
+                     distinct)
+        matches (->> (concat self-ids scoped-task-ids ref-ids)
+                     distinct
+                     (store/pull-entities-by-id db-value)
                      sort-asc)]
     {:task (brief task)
      :timeline (mapv brief matches)}))
@@ -271,18 +402,27 @@
 (defn prior-decisions-for-task
   [conn task-id]
   (let [db-value (store/db conn)
-        task (store/pull-entity-by-id db-value task-id)
-        touched-files (->> (:task/touched-files task)
-                           (map :entity/id)
-                           set)
-        task-created (created-at-ms task)]
-    (->> (store/project-entities db-value (entity-project-id task))
-         (filter #(= :decision (:entity/type %)))
-         (filter (fn [decision]
-                   (let [decision-files (->> (:decision/related-files decision) (map :entity/id) set)
-                         decision-created (created-at-ms decision)]
-                     (and (seq (set/intersection touched-files decision-files))
-                          (< (or decision-created 0) task-created)))))
+        task (store/pull-entity-by-id db-value task-id)]
+    (when-not task
+      (throw (ex-info "Task does not exist" {:task-id task-id})))
+    (->> (d/q '[:find ?decision-id
+                :in $ ?task-id
+                :where
+                [?task :entity/id ?task-id]
+                [?task :entity/project ?project]
+                [?task :entity/created-at ?task-created]
+                [?task :task/touched-files ?file]
+                [?decision :entity/type :decision]
+                [?decision :entity/project ?project]
+                [?decision :decision/related-files ?file]
+                [?decision :entity/id ?decision-id]
+                [?decision :entity/created-at ?decision-created]
+                [(< ?decision-created ?task-created)]]
+              db-value
+              task-id)
+         (map first)
+         distinct
+         (store/pull-entities-by-id db-value)
          sort-desc
          (mapv brief))))
 
@@ -301,13 +441,18 @@
   [conn {:keys [project-id query anchor-id limit]
          :or {limit 8}}]
   (let [db-value (store/db conn)
+        project-eid (require-eid db-value project-id "project")
+        scoped-id-set (->> (scoped-entity-ids db-value {project-id project-eid})
+                           set)
         search-hits (store/search-body db-value query {:limit limit
-                                                       :predicate #(= project-id (entity-project-id %))})
+                                                       :predicate #(contains? scoped-id-set (:entity/id %))})
         graph-hits (if anchor-id
-                     (map #(store/pull-entity-by-id db-value (:entity/id %))
-                          (:related (find-related-context conn {:entity-id anchor-id
+                     (->> (:related (find-related-context conn {:entity-id anchor-id
+                                                                :project-ids [project-id]
                                                                 :limit limit
-                                                                :hops 2})))
+                                                                :hops 2}))
+                          (map :entity/id)
+                          (store/pull-entities-by-id db-value))
                      [])
         combined (->> (concat search-hits graph-hits)
                       (remove nil?)

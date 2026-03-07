@@ -12,6 +12,8 @@
     :default store/default-db-path]
    ["-s" "--seed-file FILE" "Path to the EDN seed dataset."
     :default ingest/default-seed-file]
+   [nil "--seed-before-run" "Seed the database before running inspect commands."
+    :default false]
    ["-h" "--help"]])
 
 (defn- usage
@@ -75,7 +77,8 @@
 
       :else
       (do
-        (ingest/seed! {:db-path (:db-path options) :seed-file (:seed-file options)})
+        (when (:seed-before-run options)
+          (ingest/seed! {:db-path (:db-path options) :seed-file (:seed-file options)}))
         (let [conn (store/open-conn (:db-path options))]
           (try
             (print-result (dispatch-command conn command command-args))

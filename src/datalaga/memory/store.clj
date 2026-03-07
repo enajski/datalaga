@@ -103,13 +103,14 @@
   [:entity/id entity-id])
 
 (defn- resolve-ref-id
-  [db-value attr ref-id]
+  [db-value new-ids attr ref-id]
   (cond
     (nil? ref-id) nil
     (vector? ref-id) ref-id
-    (map? ref-id) (resolve-ref-id db-value attr (:entity/id ref-id))
+    (map? ref-id) (resolve-ref-id db-value new-ids attr (:entity/id ref-id))
     (string? ref-id)
-    (if (lookup-eid db-value ref-id)
+    (if (or (contains? new-ids ref-id)
+            (lookup-eid db-value ref-id))
       (entity-id->lookup-ref ref-id)
       (throw (ex-info "Referenced entity does not exist"
                       {:attr attr :ref-id ref-id})))
@@ -144,34 +145,25 @@
                        :ref-id ref-id})))))
 
 (defn- resolve-ref-value
-  [db-value attr value]
+  [db-value new-ids attr value]
   (if (schema/many-attrs attr)
     (->> value
          util/ensure-vector
-         (mapv #(resolve-ref-id db-value attr %)))
-    (resolve-ref-id db-value attr value)))
+         (mapv #(resolve-ref-id db-value new-ids attr %)))
+    (resolve-ref-id db-value new-ids attr value)))
 
-(defn- build-scalar-tx
-  [entity]
-  (let [scalar-map (->> entity
-                        (remove (fn [[attr value]]
-                                  (or (nil? value)
-                                      (schema/ref-attrs attr)
-                                      (and (= attr :entity/id) (str/blank? value)))))
-                        (into {}))]
-    (when (> (count scalar-map) 1)
-      scalar-map)))
-
-(defn- build-ref-tx
-  [db-value entity]
-  (let [ref-map (reduce-kv (fn [acc attr value]
-                             (if (or (nil? value) (not (schema/ref-attrs attr)))
-                               acc
-                               (assoc acc attr (resolve-ref-value db-value attr value))))
-                           {}
-                           entity)]
-    (when (seq ref-map)
-      (assoc ref-map :db/id (entity-id->lookup-ref (:entity/id entity))))))
+(defn- build-entity-tx
+  [db-value new-ids entity]
+  (let [tx-map (reduce-kv (fn [acc attr value]
+                            (cond
+                              (nil? value) acc
+                              (and (= attr :entity/id) (str/blank? value)) acc
+                              (schema/ref-attrs attr) (assoc acc attr (resolve-ref-value db-value new-ids attr value))
+                              :else (assoc acc attr value)))
+                          {}
+                          entity)]
+    (when (> (count tx-map) 1)
+      tx-map)))
 
 (defn- known-new-ids
   [entities]
@@ -199,11 +191,8 @@
     (doseq [entity merged-entities]
       (validate-entity! starting-db new-ids entity)
       (validate-ref-attrs! starting-db new-ids entity))
-    (when-let [scalar-tx (seq (keep build-scalar-tx merged-entities))]
-      (d/transact! conn scalar-tx))
-    (let [db-after-scalars (db conn)]
-      (when-let [ref-tx (seq (keep #(build-ref-tx db-after-scalars %) merged-entities))]
-        (d/transact! conn ref-tx)))
+    (when-let [tx-data (seq (keep #(build-entity-tx starting-db new-ids %) merged-entities))]
+      (d/transact! conn tx-data))
     {:entity-ids (mapv :entity/id merged-entities)
      :entity-count (count merged-entities)}))
 
@@ -240,6 +229,76 @@
                project-eid))
          distinct
          vec)))
+
+(defn project-eid
+  [db-value project-id]
+  (lookup-eid db-value project-id))
+
+(defn require-project-eid
+  [db-value project-id]
+  (or (project-eid db-value project-id)
+      (throw (ex-info "Project does not exist" {:project-id project-id}))))
+
+(defn project-entity-ids-by-type
+  [db-value project-eid entity-type]
+  (d/q '[:find [?entity-id ...]
+         :in $ ?project ?entity-type
+         :where
+         [?e :entity/project ?project]
+         [?e :entity/type ?entity-type]
+         [?e :entity/id ?entity-id]]
+       db-value
+       project-eid
+       entity-type))
+
+(defn project-entity-ids-for-eid
+  [db-value project-eid]
+  (d/q '[:find [?entity-id ...]
+         :in $ ?project
+         :where
+         [?e :entity/project ?project]
+         [?e :entity/id ?entity-id]]
+       db-value
+       project-eid))
+
+(defn project-entity-ids-by-type-and-attr-value
+  [db-value project-eid entity-type attr value]
+  (d/q '[:find [?entity-id ...]
+         :in $ ?project ?entity-type ?attr ?value
+         :where
+         [?e :entity/project ?project]
+         [?e :entity/type ?entity-type]
+         [?e ?attr ?value]
+         [?e :entity/id ?entity-id]]
+       db-value
+       project-eid
+       entity-type
+       attr
+       value))
+
+(defn project-max-instant
+  [db-value project-eid attr]
+  (d/q '[:find (max ?ts) .
+         :in $ ?project ?attr
+         :where
+         [?e :entity/project ?project]
+         [?e ?attr ?ts]]
+       db-value
+       project-eid
+       attr))
+
+(defn project-ref-edge-pairs
+  [db-value project-eid attr]
+  (d/q '[:find ?src-id ?dst-id
+         :in $ ?project ?attr
+         :where
+         [?e :entity/project ?project]
+         [?e :entity/id ?src-id]
+         [?e ?attr ?dst]
+         [?dst :entity/id ?dst-id]]
+       db-value
+       project-eid
+       attr))
 
 (defn project-entities
   [db-value project-id]

@@ -31,10 +31,8 @@ The `:entity/body` attribute is full-text indexed and stores normalized searchab
 
 - connection lifecycle (`open-conn`, `close!`, `db`)
 - merge/upsert behavior by stable `:entity/id`
-- two-stage transactions:
-  - scalar attrs first
-  - ref attrs resolved and transacted second
-- ref prevalidation before writes to fail fast on missing referenced entities and avoid partial scalar-only commits
+- single Datalevin transaction per write batch (scalar + ref attrs together)
+- ref prevalidation before writes to fail fast on missing referenced entities and avoid partial commits
 - pull/query helpers for project scans and entity fetches
 - full-text helper (`search-body`) used by retrieval flows
 
@@ -86,11 +84,13 @@ Tool behavior:
   - `normalize_project_memory` (project-scoped dry-run/apply normalization and backfill)
 - read tools map to high-level query functions:
   - `search_notes`, `find_related_context`, `get_symbol_memory`, `get_task_timeline`, `summarize_project_memory`
+  - plus generic read primitives: `memory_query` (EDN Datalog) and `memory_pull` (EDN pull pattern)
 
 Design principle:
 
 - expose coding-memory operations, not raw Datalevin internals
 - return actionable remediation hints when project references are missing
+- avoid implicit data mutation at process startup; seeding is opt-in (`--seed-on-start`)
 
 Operational semantics implemented in tools:
 
