@@ -1407,7 +1407,7 @@
    {:name "memory_pull"
     :description "Pull an entity with an optional EDN pull pattern. Defaults to the server readable pull pattern."
     :inputSchema {:type "object"
-                  :properties {:entity_id {:type ["string" "integer"]}
+                  :properties {:entity_id {:type "string"}
                                :pattern_edn {:type "string"}}
                   :required ["entity_id"]}}
    {:name "normalize_project_memory"
