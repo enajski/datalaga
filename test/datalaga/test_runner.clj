@@ -6,7 +6,9 @@
   (require 'datalaga.memory.store-test)
   (require 'datalaga.memory.queries-test)
   (require 'datalaga.mcp.server-test)
+  (require 'datalaga.cli-test)
   (let [{:keys [fail error]} (t/run-tests 'datalaga.memory.store-test
                                           'datalaga.memory.queries-test
-                                          'datalaga.mcp.server-test)]
+                                          'datalaga.mcp.server-test
+                                          'datalaga.cli-test)]
     (System/exit (if (pos? (+ fail error)) 1 0))))

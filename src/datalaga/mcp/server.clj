@@ -48,7 +48,8 @@
     "Options:"
     summary]))
 
-(defn- deep-keywordize
+(defn deep-keywordize
+  "Recursively keywordize string keys in maps and vectors."
   [value]
   (cond
     (map? value) (into {}
@@ -1087,7 +1088,11 @@
      :pattern pattern
      :entity entity}))
 
-(defn- call-tool!
+(defn call-tool!
+  "Execute a named MCP tool against a Datalevin connection.
+  tool-name is a string (e.g. \"ensure_project\"), arguments is a
+  keyword-keyed map.  Returns a result map.  Throws on validation
+  errors, missing entities, or unknown tools."
   [conn tool-name arguments]
   (validate-tool-arguments! tool-name arguments)
   (case tool-name
@@ -1182,7 +1187,8 @@
            :error_type error-type
            :retry_bootstrap_recommended retry-bootstrap?)))
 
-(defn- tools
+(defn tools
+  "Return the list of available tool descriptors (name, description, inputSchema)."
    []
    [{:name "ensure_project"
     :description "Use before first write in a repo to create or verify a project memory root."

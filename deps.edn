@@ -6,9 +6,20 @@
         datalevin/datalevin {:mvn/version "0.9.27"}}
  :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}
  :aliases {:mcp {:main-opts ["-m" "datalaga.mcp.server"]}
+           :cli {:main-opts ["-m" "datalaga.cli"]}
            :seed {:main-opts ["-m" "datalaga.ingest"]}
            :inspect {:main-opts ["-m" "datalaga.inspect"]}
            :eval {:main-opts ["-m" "datalaga.eval"]}
            :maintenance {:main-opts ["-m" "datalaga.maintenance"]}
            :test {:extra-paths ["test"]
-                  :main-opts ["-m" "datalaga.test-runner"]}}}
+                  :main-opts ["-m" "datalaga.test-runner"]}
+            :build {:extra-deps {io.github.clojure/tools.build
+                                  {:mvn/version "0.10.7"}
+                                  com.github.clj-easy/graal-build-time
+                                  {:mvn/version "1.0.5"}}
+                    :ns-default build}
+            :native-image {:extra-deps {com.github.clj-easy/graal-build-time
+                                        {:mvn/version "1.0.5"}}
+                           :main-opts ["-m" "datalaga.cli"]
+                           :jvm-opts ["-Dclojure.compiler.direct-linking=true"
+                                      "-Dclojure.spec.skip-macros=true"]}}}

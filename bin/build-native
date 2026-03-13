@@ -1,0 +1,79 @@
+#!/bin/sh
+set -eu
+
+# Build a GraalVM native image of the datalaga CLI.
+#
+# Prerequisites:
+#   - GraalVM 25+ with native-image installed
+#   - GRAALVM_HOME set (or native-image on PATH)
+#
+# For native image builds, Datalevin requires the native artifact:
+#   Replace  datalevin/datalevin  with
+#   org.clojars.huahaiy/datalevin-native  (same version)
+#   in deps.edn *before* running this script.
+#
+# Environment variables honoured:
+#   GRAALVM_HOME        — root of GraalVM installation
+#   DTLV_COMPILE_NATIVE — set to "true" (done automatically below)
+#   DTLV_LIB_EXTRACT_DIR — optional custom path for Datalevin native libs
+
+ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+# ---------- preflight checks ----------
+
+if [ -n "${GRAALVM_HOME:-}" ]; then
+  NATIVE_IMAGE="$GRAALVM_HOME/bin/native-image"
+else
+  NATIVE_IMAGE="$(command -v native-image 2>/dev/null || true)"
+fi
+
+if [ -z "$NATIVE_IMAGE" ] || [ ! -x "$NATIVE_IMAGE" ]; then
+  echo "Error: native-image not found." >&2
+  echo "Set GRAALVM_HOME or add native-image to PATH." >&2
+  exit 1
+fi
+
+echo "Using native-image: $NATIVE_IMAGE"
+echo "  $("$NATIVE_IMAGE" --version)"
+
+# ---------- build uberjar ----------
+
+export DTLV_COMPILE_NATIVE=true
+export USE_NATIVE_IMAGE_JAVA_PLATFORM_MODULE_SYSTEM=false
+
+echo ""
+echo "==> Building uberjar ..."
+clojure -T:build uber
+
+# ---------- compile native image ----------
+
+UBER_JAR="$ROOT/target/datalaga.jar"
+OUTPUT="$ROOT/target/datalaga"
+
+echo ""
+echo "==> Compiling native image ..."
+
+NATIVE_ARGS=(
+  --verbose
+  --no-fallback
+  -jar "$UBER_JAR"
+  -o "$OUTPUT"
+  --features=clj_easy.graal_build_time.InitClojureClasses
+  --enable-url-protocols=https
+  --enable-native-access=ALL-UNNAMED
+  -J-Dclojure.spec.skip-macros=true
+  -J-Dclojure.compiler.direct-linking=true
+  --initialize-at-build-time=me.lemire.integercompression
+  "--initialize-at-run-time=org.bytedeco.javacpp.presets.javacpp,datalevin.dtlvnative,datalevin.cpp,org.eclipse.collections.impl.set.sorted.mutable"
+)
+
+if [ -n "${DTLV_LIB_EXTRACT_DIR:-}" ]; then
+  NATIVE_ARGS+=("-H:CLibraryPath=${DTLV_LIB_EXTRACT_DIR}")
+fi
+
+"$NATIVE_IMAGE" "${NATIVE_ARGS[@]}"
+
+echo ""
+echo "Native image built: $OUTPUT"
+echo "Test:  $OUTPUT list_projects"
