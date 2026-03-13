@@ -7,7 +7,7 @@
     clj -T:build uber+run  ;; build jar and print a quick smoke-test"
   (:require [clojure.tools.build.api :as b]))
 
-(def lib 'com.blockether/datalaga)
+(def lib 'pl.enajski/datalaga)
 (def version "0.1.0")
 (def class-dir "target/classes")
 (def uber-file "target/datalaga.jar")
