@@ -55,6 +55,8 @@ The wrapper:
 - extracts required Datalevin native libraries into `.native/dtlv` on macOS x86_64
 - sets `DYLD_LIBRARY_PATH` appropriately
 
+If you run `clojure` directly and the native libraries are not configured, startup and tests can fail with errors like `UnsatisfiedLinkError: no jniDTLV in java.library.path` or `Library not loaded: 'libdtlv.dylib'`. In that case, rerun the command through `./bin/clojure-with-dtlv ...` or another entrypoint that uses the wrapper.
+
 ## Run the Prototype
 
 ### CLI (without MCP)
