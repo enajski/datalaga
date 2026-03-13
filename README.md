@@ -24,11 +24,13 @@ That combination is promising for coding memory where facts and relationships ma
 
 - `src/datalaga/memory` schema, transaction logic, query logic
 - `src/datalaga/mcp/server.clj` MCP stdio server (tools + resources)
+- `src/datalaga/cli.clj` standalone CLI — all tools without MCP protocol
 - `src/datalaga/ingest.clj` ingestion and normalization pipeline
 - `src/datalaga/eval.clj` evaluation harness + MCP smoke test
 - `src/datalaga/inspect.clj` inspection CLI for debugging memory
 - `src/datalaga/maintenance.clj` maintenance CLI for normalization/backfill
 - `src/datalaga/memory/maintenance.clj` shared normalization engine
+- `build.clj` uberjar build script for native-image compilation
 - `examples/seed-data.edn` synthetic but realistic linked coding-memory dataset
 - `eval/report.md` generated evaluation report
 - `docs/architecture.md` architecture details
@@ -55,7 +57,71 @@ The wrapper:
 
 ## Run the Prototype
 
-Start MCP server:
+### CLI (without MCP)
+
+The `datalaga` CLI exposes every MCP tool as a direct command. No JSON-RPC protocol — just command-line arguments and structured output.
+
+```bash
+# List all available tools
+./bin/datalaga tools
+
+# Get help for a specific tool
+./bin/datalaga help ensure_project
+
+# Create a project
+./bin/datalaga ensure_project --project_id project:myapp --name "My App"
+
+# List projects
+./bin/datalaga list_projects
+
+# Search entities
+./bin/datalaga search_entities --project_id project:myapp --query "auth"
+
+# Record a tool run
+./bin/datalaga record_tool_run \
+  --run_id run:001 \
+  --project_id project:myapp \
+  --command "npm test" \
+  --exit_code 0
+
+# Remember a fact
+./bin/datalaga remember_fact \
+  --entity_id note:finding-1 \
+  --entity_type note \
+  --summary "Auth flow needs refactor" \
+  --project_id project:myapp
+
+# Run a raw Datalog query
+./bin/datalaga memory_query \
+  --query_edn '[:find [?id ...] :where [?e :entity/id ?id]]'
+
+# Summarize project memory
+./bin/datalaga summarize_project_memory --project_id project:myapp
+
+# Output as JSON instead of pretty-printed EDN
+./bin/datalaga list_projects -f json
+
+# Pass arguments as a JSON object
+./bin/datalaga ensure_project --json '{"project_id":"project:myapp","name":"My App"}'
+
+# Read arguments from stdin
+echo '{"project_id":"project:myapp"}' | ./bin/datalaga list_projects -
+```
+
+Global options:
+
+- `-d, --db-path PATH` — Datalevin database path (default: `.data/memory`)
+- `-s, --seed-file FILE` — Seed data file (default: `examples/seed-data.edn`)
+- `--seed-on-start` — Seed the database before running the command
+- `-f, --format FORMAT` — Output format: `pretty` (default), `json`, `edn`
+- `--json JSON` — Pass tool arguments as a JSON object
+- `-h, --help`
+
+Hyphens and underscores are interchangeable in tool names (`list-projects` = `list_projects`).
+
+### MCP Server
+
+Start MCP server (JSON-RPC over stdio):
 
 ```bash
 ./bin/start-mcp --db-path .data/memory --seed-file examples/seed-data.edn
@@ -66,6 +132,8 @@ Seed on startup only when requested:
 ```bash
 ./bin/start-mcp --db-path .data/memory --seed-file examples/seed-data.edn --seed-on-start
 ```
+
+### Other Tools
 
 Run local demo/evaluation:
 
@@ -89,6 +157,31 @@ Run housekeeping normalization:
 ./bin/normalize-memory --project-id project:yoyo-evolve --mode dry_run
 ./bin/normalize-memory --project-id project:yoyo-evolve --mode apply --migration-id migration:v1
 ./bin/normalize-memory --seed-before-run --project-id project:yoyo-evolve --mode dry_run
+```
+
+### Native Image
+
+Build a standalone native binary (requires GraalVM 25+ with `native-image`):
+
+```bash
+# For native-image builds, replace datalevin/datalevin with
+# org.clojars.huahaiy/datalevin-native in deps.edn first.
+./bin/build-native
+```
+
+This produces `target/datalaga` — a single binary that starts instantly, no JVM required.
+
+```bash
+# Run the native binary
+./target/datalaga list_projects
+./target/datalaga search_entities --project_id project:myapp --query "auth" -f json
+```
+
+To build just the uberjar (for JVM deployment without native-image):
+
+```bash
+clj -T:build uber
+java -jar target/datalaga.jar list_projects
 ```
 
 ## MCP Surface
