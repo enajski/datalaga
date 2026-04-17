@@ -8,7 +8,9 @@
             [datalaga.util :as util]))
 
 (def cli-options
-  [["-d" "--db-path PATH" "Path to the Datalevin database directory."
+  [["-b" "--backend BACKEND" "Storage backend: datalevin | datascript-sqlite."
+    :default (name store/default-backend)]
+   ["-d" "--db-path PATH" "Path to the backend store (directory for Datalevin, SQLite file for datascript-sqlite)."
     :default store/default-db-path]
    ["-s" "--seed-file FILE" "Path to the EDN seed dataset."
     :default ingest/default-seed-file]
@@ -67,8 +69,11 @@
       :else
       (do
         (when (:seed-before-run options)
-          (ingest/seed! {:db-path (:db-path options) :seed-file (:seed-file options)}))
-        (let [conn (store/open-conn (:db-path options))]
+          (ingest/seed! {:backend (:backend options)
+                         :db-path (:db-path options)
+                         :seed-file (:seed-file options)}))
+        (let [conn (store/open-conn {:backend (:backend options)
+                                     :db-path (:db-path options)})]
           (try
             (pprint/pprint
              (util/json-friendly

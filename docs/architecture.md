@@ -2,7 +2,7 @@
 
 ## 1. Memory Model
 
-The store uses Datalevin EAV entities with explicit coding-memory types:
+The store uses EAV entities with explicit coding-memory types. Datalevin is the baseline backend, and `datascript-sqlite` is an experimental backend behind the same interface:
 
 - `:project`, `:file`, `:symbol`
 - `:task`, `:session`, `:tool-run`, `:error`, `:observation`
@@ -30,8 +30,9 @@ The `:entity/body` attribute is full-text indexed and stores normalized searchab
 `memory/store.clj` provides:
 
 - connection lifecycle (`open-conn`, `close!`, `db`)
+- backend dispatch for query, pull, transact, and full-text operations
 - merge/upsert behavior by stable `:entity/id`
-- single Datalevin transaction per write batch (scalar + ref attrs together)
+- single backend transaction per write batch (scalar + ref attrs together)
 - ref prevalidation before writes to fail fast on missing referenced entities and avoid partial commits
 - pull/query helpers for project scans and entity fetches
 - full-text helper (`search-body`) used by retrieval flows
@@ -40,7 +41,7 @@ This keeps write logic explicit and debuggable, while preserving a stable identi
 
 ## 3. Ingestion and Normalization Flow
 
-`ingest.clj` converts artifact-level records into normalized Datalevin entities.
+`ingest.clj` converts artifact-level records into normalized memory entities independent of the selected backend.
 
 Input artifacts:
 
@@ -61,7 +62,7 @@ Seed flow:
 
 1. load `examples/seed-data.edn`
 2. normalize artifact records into entity maps
-3. transact entities into Datalevin
+3. transact entities into the selected backend
 
 ## 4. MCP Tool Design
 
@@ -88,7 +89,7 @@ Tool behavior:
 
 Design principle:
 
-- expose coding-memory operations, not raw Datalevin internals
+- expose coding-memory operations, not raw backend internals
 - return actionable remediation hints when project references are missing
 - avoid implicit data mutation at process startup; seeding is opt-in (`--seed-on-start`)
 

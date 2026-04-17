@@ -11,7 +11,9 @@
             [datalaga.util :as util]))
 
 (def cli-options
-  [["-d" "--db-path PATH" "Path to the Datalevin database directory."
+  [["-b" "--backend BACKEND" "Storage backend: datalevin | datascript-sqlite."
+    :default (name store/default-backend)]
+   ["-d" "--db-path PATH" "Path to the backend store (directory for Datalevin, SQLite file for datascript-sqlite)."
     :default store/default-db-path]
    ["-s" "--seed-file FILE" "Path to the EDN seed dataset."
     :default ingest/default-seed-file]
@@ -228,8 +230,11 @@
           (json/read-str :key-fn keyword)))
 
 (defn- mcp-smoke-test
-  [{:keys [db-path seed-file]}]
-  (let [process (-> (ProcessBuilder. ["./bin/start-mcp" "--db-path" db-path "--seed-file" seed-file])
+  [{:keys [backend db-path seed-file]}]
+  (let [process (-> (ProcessBuilder. ["./bin/start-mcp"
+                                      "--backend" backend
+                                      "--db-path" db-path
+                                      "--seed-file" seed-file])
                     (.directory (io/file "."))
                     (.start))
         stdout (io/reader (.getInputStream process))
@@ -411,13 +416,13 @@
      "Use Datalevin for coding-agent memory **if** the expected workflow is local-first, entity-centric, and heavily anchored on files, symbols, tasks, and execution artifacts. Do not choose it expecting zero-friction distribution across developer machines; the native dependency story means this is better described as **fit with caveats** than a clean default.\n")))
 
 (defn- run-evaluation!
-  [{:keys [db-path seed-file report-file]}]
-  (ingest/seed! {:db-path db-path :seed-file seed-file})
-  (let [conn (store/open-conn db-path)]
+  [{:keys [backend db-path seed-file report-file]}]
+  (ingest/seed! {:backend backend :db-path db-path :seed-file seed-file})
+  (let [conn (store/open-conn {:backend backend :db-path db-path})]
     (try
       (let [retrieval-results (vec (run-retrieval-eval conn))
             retrieval-summary (summarize-retrieval retrieval-results)
-            mcp-smoke (mcp-smoke-test {:db-path db-path :seed-file seed-file})
+            mcp-smoke (mcp-smoke-test {:backend backend :db-path db-path :seed-file seed-file})
             report (render-report {:retrieval-results retrieval-results
                                    :retrieval-summary retrieval-summary
                                    :mcp-smoke mcp-smoke

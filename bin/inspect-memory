@@ -2,4 +2,4 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-exec "$ROOT/bin/clojure-with-dtlv" -M -m datalaga.inspect "$@"
+exec "$ROOT/bin/clojure-with-backend" -M -m datalaga.inspect "$@"

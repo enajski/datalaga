@@ -1,13 +1,13 @@
 # Datalaga: Agentic Coding Memory Behind MCP
 
-This repository is a working exploration of Datalevin as a backend for coding-agent memory exposed through an MCP server. The prototype focuses on a thin, honest vertical slice:
+This repository is a working exploration of coding-agent memory behind MCP with pluggable Datalog backends. The current baseline backend is Datalevin, and there is now an experimental `datascript-sqlite` backend for simpler local operation.
 
 - structured EAV/Datalog memory with provenance
 - MCP tools/resources that operate on high-value coding memory actions
 - ingestion + normalization from realistic coding artifacts
 - reproducible evaluation scenarios and report generation
 
-The goal is to answer one question with evidence: should Datalevin be used for coding-agent memory behind MCP?
+The goal is to answer one question with evidence: what local-first backend shape best fits coding memory behind MCP?
 
 ## Why Datalevin
 
@@ -34,6 +34,7 @@ That combination is promising for coding memory where facts and relationships ma
 - `examples/seed-data.edn` synthetic but realistic linked coding-memory dataset
 - `eval/report.md` generated evaluation report
 - `docs/architecture.md` architecture details
+- `docs/backends.md` backend switching notes and feasibility tradeoffs
 
 ## Local Setup
 
@@ -41,11 +42,11 @@ That combination is promising for coding memory where facts and relationships ma
 
 - Clojure CLI
 - Java 21+
-- On macOS x86_64 only: `libomp` (for Datalevin native dependency)
+- On macOS x86_64 only: `libomp` when running the `datalevin` backend
 
 ### Dependency + Native Handling
 
-Use the wrapper script so Datalevin native loading works consistently:
+Use the Datalevin wrapper when you want the Datalevin backend:
 
 - `./bin/clojure-with-dtlv ...`
 
@@ -55,7 +56,10 @@ The wrapper:
 - extracts required Datalevin native libraries into `.native/dtlv` on macOS x86_64
 - sets `DYLD_LIBRARY_PATH` appropriately
 
-If you run `clojure` directly and the native libraries are not configured, startup and tests can fail with errors like `UnsatisfiedLinkError: no jniDTLV in java.library.path` or `Library not loaded: 'libdtlv.dylib'`. In that case, rerun the command through `./bin/clojure-with-dtlv ...` or another entrypoint that uses the wrapper.
+For normal entrypoints, use the backend-aware runner indirectly through `./bin/datalaga`, `./bin/start-mcp`, `./bin/inspect-memory`, `./bin/normalize-memory`, or `./bin/run-eval`.
+
+- `--backend datalevin` keeps the Datalevin wrapper path
+- `--backend datascript-sqlite` uses plain `clojure` and a SQLite-backed DataScript store
 
 ## Run the Prototype
 
@@ -112,7 +116,8 @@ echo '{"project_id":"project:myapp"}' | ./bin/datalaga list_projects -
 
 Global options:
 
-- `-d, --db-path PATH` — Datalevin database path (default: `.data/memory`)
+- `-b, --backend BACKEND` — `datalevin` or `datascript-sqlite`
+- `-d, --db-path PATH` — backend store path (directory for Datalevin, SQLite file for `datascript-sqlite`)
 - `-s, --seed-file FILE` — Seed data file (default: `examples/seed-data.edn`)
 - `--seed-on-start` — Seed the database before running the command
 - `-f, --format FORMAT` — Output format: `pretty` (default), `json`, `edn`
@@ -127,6 +132,12 @@ Start MCP server (JSON-RPC over stdio):
 
 ```bash
 ./bin/start-mcp --db-path .data/memory --seed-file examples/seed-data.edn
+```
+
+Start the experimental SQLite-backed backend:
+
+```bash
+./bin/start-mcp --backend datascript-sqlite --db-path .data/memory.sqlite --seed-file examples/seed-data.edn
 ```
 
 Seed on startup only when requested:
@@ -205,7 +216,7 @@ Implemented tools:
 - `get_symbol_memory`
 - `get_task_timeline`
 - `summarize_project_memory`
-- `memory_query` (raw Datalevin Datalog query via EDN payload)
+- `memory_query` (raw backend Datalog query via EDN payload)
 - `memory_pull` (entity pull with optional EDN pull pattern)
 - `normalize_project_memory` (admin maintenance)
 

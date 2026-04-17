@@ -9,7 +9,9 @@
 (def default-seed-file "examples/seed-data.edn")
 
 (def cli-options
-  [["-d" "--db-path PATH" "Path to the Datalevin database directory."
+  [["-b" "--backend BACKEND" "Storage backend: datalevin | datascript-sqlite."
+    :default (name store/default-backend)]
+   ["-d" "--db-path PATH" "Path to the backend store (directory for Datalevin, SQLite file for datascript-sqlite)."
     :default store/default-db-path]
    ["-s" "--seed-file FILE" "Path to the EDN seed dataset."
     :default default-seed-file]
@@ -199,16 +201,18 @@
 
 (defn seed!
   ([]
-   (seed! {:db-path store/default-db-path
+   (seed! {:backend store/default-backend
+           :db-path store/default-db-path
            :seed-file default-seed-file}))
-  ([{:keys [db-path seed-file]}]
+  ([{:keys [backend db-path seed-file]}]
    (let [artifacts (load-artifacts seed-file)
          entities (normalize-artifacts artifacts)
-         conn (store/open-conn db-path)]
+         conn (store/open-conn {:backend backend :db-path db-path})]
      (try
        (let [report (store/transact-entities! conn entities)
              db-value (store/db conn)]
-         {:db-path db-path
+         {:backend (name (store/backend-key conn))
+          :db-path db-path
           :seed-file seed-file
           :project-ids (store/all-project-ids db-value)
           :entity-count (store/entity-count db-value)
@@ -218,7 +222,7 @@
 
 (defn usage
   [summary]
-  (->> ["Seed the Datalevin memory store with the synthetic coding-memory dataset."
+  (->> ["Seed the coding-memory store with the synthetic coding-memory dataset."
         ""
         "Usage: clojure -M:seed [options]"
         ""

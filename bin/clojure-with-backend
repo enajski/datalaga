@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+
+BACKEND="${DATALOGA_BACKEND:-}"
+
+if [ -z "$BACKEND" ]; then
+  PREV=""
+  for ARG in "$@"; do
+    if [ "$PREV" = "--backend" ] || [ "$PREV" = "-b" ]; then
+      BACKEND="$ARG"
+      break
+    fi
+    PREV="$ARG"
+  done
+fi
+
+if [ "$BACKEND" = "datascript-sqlite" ]; then
+  exec clojure "$@"
+fi
+
+exec "$ROOT/bin/clojure-with-dtlv" "$@"
