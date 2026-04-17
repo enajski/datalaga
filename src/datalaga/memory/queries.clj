@@ -1,6 +1,5 @@
 (ns datalaga.memory.queries
   (:require [clojure.string :as str]
-            [datalevin.core :as d]
             [datalaga.memory.schema :as schema]
             [datalaga.memory.store :as store]
             [datalaga.util :as util]))
@@ -134,28 +133,28 @@
       (->> attrs
            (mapcat (fn [attr]
                      (if project-eid
-                       (d/q '[:find [?entity-id ...]
-                              :in $ ?project ?attr ?target-lower
-                              :where
-                              [?e :entity/project ?project]
-                              [?e ?attr ?value]
-                              [(clojure.string/lower-case ?value) ?value-lower]
-                              [(= ?value-lower ?target-lower)]
-                              [?e :entity/id ?entity-id]]
-                            db-value
-                            project-eid
-                            attr
-                            target-lower)
-                       (d/q '[:find [?entity-id ...]
-                              :in $ ?attr ?target-lower
-                              :where
-                              [?e ?attr ?value]
-                              [(clojure.string/lower-case ?value) ?value-lower]
-                              [(= ?value-lower ?target-lower)]
-                              [?e :entity/id ?entity-id]]
-                            db-value
-                            attr
-                            target-lower))))
+                       (store/query db-value
+                                    '[:find [?entity-id ...]
+                                      :in $ ?project ?attr ?target-lower
+                                      :where
+                                      [?e :entity/project ?project]
+                                      [?e ?attr ?value]
+                                      [(clojure.string/lower-case ?value) ?value-lower]
+                                      [(= ?value-lower ?target-lower)]
+                                      [?e :entity/id ?entity-id]]
+                                    project-eid
+                                    attr
+                                    target-lower)
+                       (store/query db-value
+                                    '[:find [?entity-id ...]
+                                      :in $ ?attr ?target-lower
+                                      :where
+                                      [?e ?attr ?value]
+                                      [(clojure.string/lower-case ?value) ?value-lower]
+                                      [(= ?value-lower ?target-lower)]
+                                      [?e :entity/id ?entity-id]]
+                                    attr
+                                    target-lower))))
            distinct
            vec))))
 
@@ -173,13 +172,13 @@
   [conn project-id]
   (let [db-value (store/db conn)
         project-eid (require-eid db-value project-id "project")
-        counts-by-type (d/q '[:find ?entity-type (count ?e)
-                              :in $ ?project
-                              :where
-                              [?e :entity/project ?project]
-                              [?e :entity/type ?entity-type]]
-                            db-value
-                            project-eid)
+        counts-by-type (store/query db-value
+                                    '[:find ?entity-type (count ?e)
+                                      :in $ ?project
+                                      :where
+                                      [?e :entity/project ?project]
+                                      [?e :entity/type ?entity-type]]
+                                    project-eid)
         counts (assoc (into {} (map (fn [[entity-type c]] [entity-type c]) counts-by-type))
                       :project 1)
         recent-patches (->> (store/project-entity-ids-by-type db-value project-eid :patch)
@@ -237,18 +236,18 @@
         project-id (entity-project-id session)
         project-eid (require-eid db-value project-id "project")
         session-eid (require-eid db-value session-id "session")
-        entity-ids (d/q '[:find [?entity-id ...]
-                          :in $ ?project ?session ?timeline-types
-                          :where
-                          [?e :entity/project ?project]
-                          [?e :entity/session ?session]
-                          [?e :entity/type ?entity-type]
-                          [(contains? ?timeline-types ?entity-type)]
-                          [?e :entity/id ?entity-id]]
-                        db-value
-                        project-eid
-                        session-eid
-                        schema/timeline-types)]
+        entity-ids (store/query db-value
+                                '[:find [?entity-id ...]
+                                  :in $ ?project ?session ?timeline-types
+                                  :where
+                                  [?e :entity/project ?project]
+                                  [?e :entity/session ?session]
+                                  [?e :entity/type ?entity-type]
+                                  [(contains? ?timeline-types ?entity-type)]
+                                  [?e :entity/id ?entity-id]]
+                                project-eid
+                                session-eid
+                                schema/timeline-types)]
     {:session (brief session)
      :entries (->> (store/pull-entities-by-id db-value entity-ids)
                    sort-asc
@@ -381,46 +380,46 @@
         project-eid (store/lookup-eid db-value project-id)
         task-eid (store/lookup-eid db-value task-id)
         timeline-types schema/timeline-types
-        self-ids (d/q '[:find [?entity-id ...]
-                        :in $ ?project ?task-id ?timeline-types
-                        :where
-                        [?e :entity/project ?project]
-                        [?e :entity/type ?etype]
-                        [(contains? ?timeline-types ?etype)]
-                        [?e :entity/id ?entity-id]
-                        [(= ?entity-id ?task-id)]]
-                      db-value
-                      project-eid
-                      task-id
-                      timeline-types)
-        scoped-task-ids (d/q '[:find [?entity-id ...]
-                               :in $ ?project ?task-eid ?timeline-types
-                               :where
-                               [?e :entity/project ?project]
-                               [?e :entity/type ?etype]
-                               [(contains? ?timeline-types ?etype)]
-                               [?e :entity/task ?task-eid]
-                               [?e :entity/id ?entity-id]]
-                             db-value
-                             project-eid
-                             task-eid
-                             timeline-types)
+        self-ids (store/query db-value
+                              '[:find [?entity-id ...]
+                                :in $ ?project ?task-id ?timeline-types
+                                :where
+                                [?e :entity/project ?project]
+                                [?e :entity/type ?etype]
+                                [(contains? ?timeline-types ?etype)]
+                                [?e :entity/id ?entity-id]
+                                [(= ?entity-id ?task-id)]]
+                              project-eid
+                              task-id
+                              timeline-types)
+        scoped-task-ids (store/query db-value
+                                     '[:find [?entity-id ...]
+                                       :in $ ?project ?task-eid ?timeline-types
+                                       :where
+                                       [?e :entity/project ?project]
+                                       [?e :entity/type ?etype]
+                                       [(contains? ?timeline-types ?etype)]
+                                       [?e :entity/task ?task-eid]
+                                       [?e :entity/id ?entity-id]]
+                                     project-eid
+                                     task-eid
+                                     timeline-types)
         ref-attrs [:entity/refs :note/refers-to :event/subjects :link/from :link/to :link/evidence]
         ref-ids (->> ref-attrs
                      (mapcat (fn [attr]
-                               (d/q '[:find [?entity-id ...]
-                                      :in $ ?project ?task-eid ?attr ?timeline-types
-                                      :where
-                                      [?e :entity/project ?project]
-                                      [?e :entity/type ?etype]
-                                      [(contains? ?timeline-types ?etype)]
-                                      [?e ?attr ?task-eid]
-                                      [?e :entity/id ?entity-id]]
-                                    db-value
-                                    project-eid
-                                    task-eid
-                                    attr
-                                    timeline-types)))
+                               (store/query db-value
+                                            '[:find [?entity-id ...]
+                                              :in $ ?project ?task-eid ?attr ?timeline-types
+                                              :where
+                                              [?e :entity/project ?project]
+                                              [?e :entity/type ?etype]
+                                              [(contains? ?timeline-types ?etype)]
+                                              [?e ?attr ?task-eid]
+                                              [?e :entity/id ?entity-id]]
+                                            project-eid
+                                            task-eid
+                                            attr
+                                            timeline-types)))
                      distinct)
         matches (->> (concat self-ids scoped-task-ids ref-ids)
                      distinct
@@ -435,21 +434,21 @@
         task (store/pull-entity-by-id db-value task-id)]
     (when-not task
       (throw (ex-info "Task does not exist" {:task-id task-id})))
-    (->> (d/q '[:find ?decision-id
-                :in $ ?task-id
-                :where
-                [?task :entity/id ?task-id]
-                [?task :entity/project ?project]
-                [?task :entity/created-at ?task-created]
-                [?task :task/touched-files ?file]
-                [?decision :entity/type :decision]
-                [?decision :entity/project ?project]
-                [?decision :decision/related-files ?file]
-                [?decision :entity/id ?decision-id]
-                [?decision :entity/created-at ?decision-created]
-                [(< ?decision-created ?task-created)]]
-              db-value
-              task-id)
+    (->> (store/query db-value
+                      '[:find ?decision-id
+                        :in $ ?task-id
+                        :where
+                        [?task :entity/id ?task-id]
+                        [?task :entity/project ?project]
+                        [?task :entity/created-at ?task-created]
+                        [?task :task/touched-files ?file]
+                        [?decision :entity/type :decision]
+                        [?decision :entity/project ?project]
+                        [?decision :decision/related-files ?file]
+                        [?decision :entity/id ?decision-id]
+                        [?decision :entity/created-at ?decision-created]
+                        [(< ?decision-created ?task-created)]]
+                      task-id)
          (map first)
          distinct
          (store/pull-entities-by-id db-value)

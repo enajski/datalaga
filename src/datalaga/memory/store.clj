@@ -1,43 +1,92 @@
 (ns datalaga.memory.store
   (:require [clojure.string :as str]
-            [datalevin.core :as d]
+            [datalaga.memory.backend :as memory-backend]
             [datalaga.memory.schema :as schema]
             [datalaga.util :as util]))
 
-(def default-db-path ".data/memory")
+(def default-backend memory-backend/default-backend)
+(def default-db-path memory-backend/default-db-path)
+(def supported-backends memory-backend/supported-backends)
 
-(def datalevin-opts
-  {:validate-data? true
-   :closed-schema? false})
+(defn default-db-path-for
+  [backend]
+  (memory-backend/default-db-path-for backend))
+
+(defn normalize-backend
+  [backend]
+  (memory-backend/normalize-backend backend))
+
+(defn- normalize-open-config
+  [config-or-path]
+  (let [{:keys [backend db-path]} (if (map? config-or-path)
+                                    config-or-path
+                                    {:backend default-backend
+                                     :db-path config-or-path})
+        backend (normalize-backend backend)
+        db-path (cond
+                  (and (= backend :datascript-sqlite)
+                       (or (nil? db-path)
+                           (= db-path default-db-path)))
+                  (default-db-path-for backend)
+
+                  (nil? db-path)
+                  (default-db-path-for backend)
+
+                  :else db-path)]
+    {:backend backend
+     :db-path db-path}))
+
+(defn- backend-open-fn
+  [backend]
+  (case (normalize-backend backend)
+    :datalevin (requiring-resolve 'datalaga.memory.backends.datalevin/open-conn)
+    :datascript-sqlite (requiring-resolve 'datalaga.memory.backends.datascript-sqlite/open-conn)))
 
 (defn open-conn
-  ([] (open-conn default-db-path))
-  ([db-path]
-   (d/get-conn db-path schema/schema datalevin-opts)))
+  ([] (open-conn {:backend default-backend}))
+  ([config-or-path]
+   (let [{:keys [backend db-path]} (normalize-open-config config-or-path)]
+     ((backend-open-fn backend) db-path))))
 
 (defn close!
   [conn]
-  (d/close conn))
+  (memory-backend/close-connection! conn))
+
+(defn backend-key
+  [conn]
+  (memory-backend/backend-key conn))
+
+(defn backend-capabilities
+  [conn]
+  (memory-backend/backend-capabilities conn))
 
 (defn db
   [conn]
-  (d/db conn))
+  (memory-backend/snapshot conn))
+
+(defn query
+  [db-value query-form & inputs]
+  (memory-backend/query-snapshot db-value query-form inputs))
+
+(defn pull
+  [db-value pull-pattern entity-ref]
+  (memory-backend/pull-snapshot db-value pull-pattern entity-ref))
 
 (defn lookup-eid
   [db-value entity-id]
-  (d/q '[:find ?e .
-         :in $ ?entity-id
-         :where
-         [?e :entity/id ?entity-id]]
-       db-value
-       entity-id))
+  (query db-value
+         '[:find ?e .
+           :in $ ?entity-id
+           :where
+           [?e :entity/id ?entity-id]]
+         entity-id))
 
 (defn entity-count
   [db-value]
-  (or (d/q '[:find (count ?e) .
-             :where
-             [?e :entity/id _]]
-           db-value)
+  (or (query db-value
+             '[:find (count ?e) .
+               :where
+               [?e :entity/id _]])
       0))
 
 (defn database-empty?
@@ -48,7 +97,7 @@
   [db-value entity-id]
   (when-let [entity (some->> entity-id
                              (lookup-eid db-value)
-                             (d/pull db-value [:entity/id :entity/type {:entity/project [:entity/id]}]))]
+                             (pull db-value [:entity/id :entity/type {:entity/project [:entity/id]}]))]
     (or (get-in entity [:entity/project :entity/id])
         (when (= :project (:entity/type entity))
           (:entity/id entity)))))
@@ -200,7 +249,7 @@
       (validate-entity! starting-db new-tempids entity)
       (validate-ref-attrs! starting-db new-tempids entity))
     (when-let [tx-data (seq (keep #(build-entity-tx starting-db new-tempids %) merged-entities))]
-      (d/transact! conn tx-data))
+      (memory-backend/transact-tx! conn tx-data))
     {:entity-ids (mapv :entity/id merged-entities)
      :entity-count (count merged-entities)}))
 
@@ -209,7 +258,7 @@
    (pull-entity-by-id db-value entity-id schema/readable-pull))
   ([db-value entity-id pull-pattern]
    (when-let [eid (lookup-eid db-value entity-id)]
-     (d/pull db-value pull-pattern eid))))
+     (pull db-value pull-pattern eid))))
 
 (defn pull-entities-by-id
   ([db-value entity-ids]
@@ -228,13 +277,13 @@
       (throw (ex-info "Project does not exist" {:project-id project-id})))
     (->> (concat
           [project-id]
-          (d/q '[:find [?entity-id ...]
-                 :in $ ?project
-                 :where
-                 [?e :entity/project ?project]
-                 [?e :entity/id ?entity-id]]
-               db-value
-               project-eid))
+          (query db-value
+                 '[:find [?entity-id ...]
+                   :in $ ?project
+                   :where
+                   [?e :entity/project ?project]
+                   [?e :entity/id ?entity-id]]
+                 project-eid))
          distinct
          vec)))
 
@@ -249,64 +298,64 @@
 
 (defn project-entity-ids-by-type
   [db-value project-eid entity-type]
-  (d/q '[:find [?entity-id ...]
-         :in $ ?project ?entity-type
-         :where
-         [?e :entity/project ?project]
-         [?e :entity/type ?entity-type]
-         [?e :entity/id ?entity-id]]
-       db-value
-       project-eid
-       entity-type))
+  (query db-value
+         '[:find [?entity-id ...]
+           :in $ ?project ?entity-type
+           :where
+           [?e :entity/project ?project]
+           [?e :entity/type ?entity-type]
+           [?e :entity/id ?entity-id]]
+         project-eid
+         entity-type))
 
 (defn project-entity-ids-for-eid
   [db-value project-eid]
-  (d/q '[:find [?entity-id ...]
-         :in $ ?project
-         :where
-         [?e :entity/project ?project]
-         [?e :entity/id ?entity-id]]
-       db-value
-       project-eid))
+  (query db-value
+         '[:find [?entity-id ...]
+           :in $ ?project
+           :where
+           [?e :entity/project ?project]
+           [?e :entity/id ?entity-id]]
+         project-eid))
 
 (defn project-entity-ids-by-type-and-attr-value
   [db-value project-eid entity-type attr value]
-  (d/q '[:find [?entity-id ...]
-         :in $ ?project ?entity-type ?attr ?value
-         :where
-         [?e :entity/project ?project]
-         [?e :entity/type ?entity-type]
-         [?e ?attr ?value]
-         [?e :entity/id ?entity-id]]
-       db-value
-       project-eid
-       entity-type
-       attr
-       value))
+  (query db-value
+         '[:find [?entity-id ...]
+           :in $ ?project ?entity-type ?attr ?value
+           :where
+           [?e :entity/project ?project]
+           [?e :entity/type ?entity-type]
+           [?e ?attr ?value]
+           [?e :entity/id ?entity-id]]
+         project-eid
+         entity-type
+         attr
+         value))
 
 (defn project-max-instant
   [db-value project-eid attr]
-  (d/q '[:find (max ?ts) .
-         :in $ ?project ?attr
-         :where
-         [?e :entity/project ?project]
-         [?e ?attr ?ts]]
-       db-value
-       project-eid
-       attr))
+  (query db-value
+         '[:find (max ?ts) .
+           :in $ ?project ?attr
+           :where
+           [?e :entity/project ?project]
+           [?e ?attr ?ts]]
+         project-eid
+         attr))
 
 (defn project-ref-edge-pairs
   [db-value project-eid attr]
-  (d/q '[:find ?src-id ?dst-id
-         :in $ ?project ?attr
-         :where
-         [?e :entity/project ?project]
-         [?e :entity/id ?src-id]
-         [?e ?attr ?dst]
-         [?dst :entity/id ?dst-id]]
-       db-value
-       project-eid
-       attr))
+  (query db-value
+         '[:find ?src-id ?dst-id
+           :in $ ?project ?attr
+           :where
+           [?e :entity/project ?project]
+           [?e :entity/id ?src-id]
+           [?e ?attr ?dst]
+           [?dst :entity/id ?dst-id]]
+         project-eid
+         attr))
 
 (defn project-entities
   [db-value project-id]
@@ -318,22 +367,22 @@
   ([db-value entity-type project-id]
    (let [project-eid (some->> project-id (lookup-eid db-value))]
      (->> (if project-eid
-            (d/q '[:find [?entity-id ...]
-                   :in $ ?entity-type ?project
-                   :where
-                   [?e :entity/type ?entity-type]
-                   [?e :entity/project ?project]
-                   [?e :entity/id ?entity-id]]
-                 db-value
-                 entity-type
-                 project-eid)
-            (d/q '[:find [?entity-id ...]
-                   :in $ ?entity-type
-                   :where
-                   [?e :entity/type ?entity-type]
-                   [?e :entity/id ?entity-id]]
-                 db-value
-                 entity-type))
+            (query db-value
+                   '[:find [?entity-id ...]
+                     :in $ ?entity-type ?project
+                     :where
+                     [?e :entity/type ?entity-type]
+                     [?e :entity/project ?project]
+                     [?e :entity/id ?entity-id]]
+                   entity-type
+                   project-eid)
+            (query db-value
+                   '[:find [?entity-id ...]
+                     :in $ ?entity-type
+                     :where
+                     [?e :entity/type ?entity-type]
+                     [?e :entity/id ?entity-id]]
+                   entity-type))
           (pull-entities-by-id db-value)
           vec))))
 
@@ -341,20 +390,8 @@
   [db-value query {:keys [limit predicate]
                    :or {limit 10
                         predicate (constantly true)}}]
-  (letfn [(entry->eid [entry]
-            (cond
-              (nil? entry) nil
-              (vector? entry) (first entry)
-              :else (d/datom-e entry)))]
-    (->> (d/fulltext-datoms db-value query)
-         (map entry->eid)
-         (remove nil?)
-         distinct
-         (map #(d/pull db-value schema/readable-pull %))
-         (remove nil?)
-         (filter predicate)
-         (take limit)
-         vec)))
+  (memory-backend/search-body-snapshot db-value query {:limit limit
+                                                       :predicate predicate}))
 
 (defn distinct-summaries
   [entities]
@@ -378,9 +415,9 @@
 
 (defn all-project-ids
   [db-value]
-  (or (d/q '[:find [?entity-id ...]
-             :where
-             [?e :entity/type :project]
-             [?e :entity/id ?entity-id]]
-           db-value)
+  (or (query db-value
+             '[:find [?entity-id ...]
+               :where
+               [?e :entity/type :project]
+               [?e :entity/id ?entity-id]])
       []))

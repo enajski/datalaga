@@ -22,7 +22,9 @@
 ;; ---------------------------------------------------------------------------
 
 (def global-options
-  [["-d" "--db-path PATH" "Path to the Datalevin database directory."
+  [["-b" "--backend BACKEND" "Storage backend: datalevin | datascript-sqlite."
+    :default (name store/default-backend)]
+   ["-d" "--db-path PATH" "Path to the backend store (directory for Datalevin, SQLite file for datascript-sqlite)."
     :default store/default-db-path]
    ["-s" "--seed-file FILE" "Path to the EDN seed dataset."
     :default ingest/default-seed-file]
@@ -181,7 +183,7 @@
   [summary]
   (str/join
    \newline
-   ["datalaga — direct CLI for Datalevin coding memory"
+   ["datalaga — direct CLI for coding memory"
     ""
     "Usage:"
     "  datalaga [options] <tool> [--arg value ...]"
@@ -214,15 +216,15 @@
 
 (defn- run-tool!
   "Open connection, optionally seed, call the tool, print result, close."
-  [{:keys [db-path seed-file seed-on-start format json]} tool-name tool-args stdin?]
+  [{:keys [backend db-path seed-file seed-on-start format json]} tool-name tool-args stdin?]
   (when seed-on-start
-    (ingest/seed! {:db-path db-path :seed-file seed-file}))
+    (ingest/seed! {:backend backend :db-path db-path :seed-file seed-file}))
   (let [stdin-args (when stdin? (read-stdin-json))
         merged-args (cond-> {}
                       stdin-args (merge stdin-args)
                       json (merge-json-args json)
                       true (merge tool-args))
-        conn (store/open-conn db-path)]
+        conn (store/open-conn {:backend backend :db-path db-path})]
     (try
       (let [result (mcp/call-tool! conn tool-name merged-args)]
         (println (format-output result format)))
@@ -244,12 +246,12 @@
 
 (def ^:private global-flag-keys
   "Short and long flags for global options (including value-bearing ones)."
-  #{"-d" "--db-path" "-s" "--seed-file" "--seed-on-start" "-f" "--format"
+  #{"-b" "--backend" "-d" "--db-path" "-s" "--seed-file" "--seed-on-start" "-f" "--format"
     "--json" "-h" "--help"})
 
 (def ^:private global-value-flags
   "Global flags that consume the next token as their value."
-  #{"-d" "--db-path" "-s" "--seed-file" "-f" "--format" "--json"})
+  #{"-b" "--backend" "-d" "--db-path" "-s" "--seed-file" "-f" "--format" "--json"})
 
 (defn- extract-global-args
   "Walk the full arg list and pull out global flags (with values)

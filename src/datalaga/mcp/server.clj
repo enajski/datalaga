@@ -5,7 +5,6 @@
             [clojure.pprint :as pprint]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
-            [datalevin.core :as d]
             [datalaga.ingest :as ingest]
             [datalaga.memory.maintenance :as maintenance]
             [datalaga.memory.queries :as queries]
@@ -24,7 +23,9 @@
 (def max-memory-query-max-results 1000)
 
 (def cli-options
-  [["-d" "--db-path PATH" "Path to the Datalevin database directory."
+  [["-b" "--backend BACKEND" "Storage backend: datalevin | datascript-sqlite."
+    :default (name store/default-backend)]
+   ["-d" "--db-path PATH" "Path to the backend store (directory for Datalevin, SQLite file for datascript-sqlite)."
     :default store/default-db-path]
    ["-s" "--seed-file FILE" "Path to the EDN seed dataset."
     :default ingest/default-seed-file]
@@ -41,7 +42,7 @@
   [summary]
   (str/join
    \newline
-   ["Start the Datalevin-backed MCP server on stdio."
+   ["Start the pluggable coding-memory MCP server on stdio."
     ""
     "Usage: clojure -M:mcp [options]"
     ""
@@ -1042,7 +1043,7 @@
                                  1
                                  max-memory-query-max-results)
         offset (bounded-int (:offset arguments) 0 0 max-offset)
-        fut (future (apply d/q query-form db-value inputs))
+        fut (future (apply store/query db-value query-form inputs))
         timeout-token ::timeout
         raw-results (deref fut timeout-ms timeout-token)]
     (when (= timeout-token raw-results)
@@ -1083,13 +1084,13 @@
         entity-id (:entity_id arguments)
         pattern (or (parse-edn-value :pattern_edn (:pattern_edn arguments))
                     memory-schema/readable-pull)
-        entity (d/pull db-value pattern (entity-ref entity-id))]
+        entity (store/pull db-value pattern (entity-ref entity-id))]
     {:entity_id entity-id
      :pattern pattern
      :entity entity}))
 
 (defn call-tool!
-  "Execute a named MCP tool against a Datalevin connection.
+  "Execute a named MCP tool against a memory backend connection.
   tool-name is a string (e.g. \"ensure_project\"), arguments is a
   keyword-keyed map.  Returns a result map.  Throws on validation
   errors, missing entities, or unknown tools."
@@ -1395,7 +1396,7 @@
                   :properties {:project_id {:type "string"}}
                   :required ["project_id"]}}
    {:name "memory_query"
-    :description "Run a raw Datalevin Datalog query. query_edn must be an EDN query form, with optional EDN/vector inputs."
+    :description "Run a raw backend Datalog query. query_edn must be an EDN query form, with optional EDN/vector inputs."
     :inputSchema {:type "object"
                   :properties {:query_edn {:type "string"}
                                :inputs {:type "array"}
@@ -1517,7 +1518,7 @@
                                     :resources {:listChanged false}}
                      :serverInfo {:name "datalaga"
                                   :version "0.1.0"}
-                     :instructions "Structured coding-memory MCP server backed by Datalevin."})
+                     :instructions "Structured coding-memory MCP server backed by pluggable Datalog storage."})
        (reset! initialized? true)]
 
       "notifications/initialized"
@@ -1561,10 +1562,10 @@
        nil])))
 
 (defn- run-server!
-  [{:keys [db-path seed-file seed-on-start]}]
+  [{:keys [backend db-path seed-file seed-on-start]}]
   (when seed-on-start
-    (ingest/seed! {:db-path db-path :seed-file seed-file}))
-  (let [conn (store/open-conn db-path)
+    (ingest/seed! {:backend backend :db-path db-path :seed-file seed-file}))
+  (let [conn (store/open-conn {:backend backend :db-path db-path})
         initialized? (atom false)
         reader (io/reader *in*)
         writer (io/writer *out*)]
